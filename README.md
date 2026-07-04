@@ -4,40 +4,24 @@ Personal command-line tools exposed through one `cli-tools` shell entrypoint.
 
 ## Install
 
-Clone the repository, then run:
-
 ```bash
 git clone https://github.com/Cynthia11281128/cli-tools.git ~/cli-tools
 cd ~/cli-tools
 ./install.sh
-```
-
-`install.sh` installs only the `cli-tools` entrypoint into a writable directory
-on `PATH` using a symlink. Run toolbox commands as `cli-tools <command>`.
-Open a new shell after installing; `cli-tools <Tab>` completes toolbox
-subcommands without mixing direct tool names into normal command completion.
-
-To choose the install location explicitly:
-
-```bash
-TOOLS_INSTALL_DIR=/path/to/bin ./install.sh
-```
-
-To refresh the entrypoint and completion symlinks:
-
-```bash
-./install.sh --reinstall
-```
-
-Verify installation:
-
-```bash
 ./install.sh --check
 ```
 
-## Update
+Run tools as `cli-tools <command>`. Open a new shell after installing to enable
+completion.
 
-For normal updates, pull the latest repository contents:
+Optional install controls:
+
+```bash
+TOOLS_INSTALL_DIR=/path/to/bin ./install.sh
+./install.sh --reinstall
+```
+
+## Update
 
 ```bash
 cd ~/cli-tools
@@ -45,17 +29,9 @@ git pull
 cli-tools list
 ```
 
-Because `cli-tools` dispatches commands from this repository's `bin/` directory,
-changes to existing tools and newly added executable subcommands usually work
-after `git pull`.
-
-Run `./install.sh` again only after the first clone, when the `cli-tools`
-command is missing or broken, when changing install directories, or when
-refreshing shell completion:
-
-```bash
-./install.sh --reinstall
-```
+`git pull` is enough for normal updates because `cli-tools` runs commands from
+this checkout. Re-run `./install.sh --reinstall` only if the entrypoint or shell
+completion is missing or broken.
 
 ## Commands
 
