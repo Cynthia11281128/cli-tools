@@ -14,10 +14,9 @@ path_contains() {
 }
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-source_cmd="$script_dir/bin/dvc-push-data"
+bin_dir="$script_dir/bin"
 
-[[ -f "$source_cmd" ]] || die "missing command: $source_cmd"
-chmod +x "$source_cmd"
+[[ -d "$bin_dir" ]] || die "missing bin directory: $bin_dir"
 
 if [[ -n "${TOOLS_INSTALL_DIR:-}" ]]; then
   install_dir="$TOOLS_INSTALL_DIR"
@@ -34,18 +33,28 @@ fi
 mkdir -p "$install_dir"
 [[ -w "$install_dir" ]] || die "install directory is not writable: $install_dir"
 
-target="$install_dir/dvc-push-data"
+installed=0
 
-if [[ -e "$target" || -L "$target" ]]; then
-  existing="$(readlink "$target" 2>/dev/null || true)"
-  if [[ "$existing" != "$source_cmd" ]]; then
-    die "refusing to overwrite existing command: $target"
+while IFS= read -r source_cmd; do
+  name="$(basename "$source_cmd")"
+  target="$install_dir/$name"
+
+  if [[ -e "$target" || -L "$target" ]]; then
+    existing="$(readlink "$target" 2>/dev/null || true)"
+    if [[ "$existing" != "$source_cmd" ]]; then
+      die "refusing to overwrite existing command: $target"
+    fi
   fi
+
+  ln -sfn "$source_cmd" "$target"
+  printf 'Installed: %s -> %s\n' "$target" "$source_cmd"
+  installed=$((installed + 1))
+done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
+
+if [[ "$installed" -eq 0 ]]; then
+  die "no executable commands found in: $bin_dir"
 fi
 
-ln -sfn "$source_cmd" "$target"
-
-printf 'Installed: %s -> %s\n' "$target" "$source_cmd"
 if ! path_contains "$install_dir"; then
   printf 'Warning: %s is not in PATH. Add it to your shell startup file.\n' "$install_dir" >&2
 fi
