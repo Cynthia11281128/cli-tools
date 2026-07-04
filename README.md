@@ -35,6 +35,28 @@ Verify installation:
 ./install.sh --check
 ```
 
+## Update
+
+For normal updates, pull the latest repository contents:
+
+```bash
+cd ~/cli-tools
+git pull
+cli-tools list
+```
+
+Because `cli-tools` dispatches commands from this repository's `bin/` directory,
+changes to existing tools and newly added executable subcommands usually work
+after `git pull`.
+
+Run `./install.sh` again only after the first clone, when the `cli-tools`
+command is missing or broken, when changing install directories, or when
+refreshing shell completion:
+
+```bash
+./install.sh --reinstall
+```
+
 ## Commands
 
 | Command | Purpose | Typical use |
