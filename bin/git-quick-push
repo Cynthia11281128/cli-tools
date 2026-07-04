@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: git-quick-push
+
+Show the current branch, upstream, and all changes that would be committed,
+then ask for confirmation, a commit message, and run:
+  git add -A
+  git commit -m "<message>"
+  git push
+
+The command must be run inside a Git repository on a branch with an upstream.
+It refuses to continue when the repository is in the middle of merge/rebase/
+cherry-pick/revert work, or when the branch is behind or diverged from upstream.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+git_path_exists() {
+  local path
+  path="$(git rev-parse --git-path "$1")"
+  [[ -e "$path" ]]
+}
+
+require_clean_git_state() {
+  local states=()
+
+  git_path_exists MERGE_HEAD && states+=("merge")
+  git_path_exists rebase-merge && states+=("rebase")
+  git_path_exists rebase-apply && states+=("rebase")
+  git_path_exists CHERRY_PICK_HEAD && states+=("cherry-pick")
+  git_path_exists REVERT_HEAD && states+=("revert")
+
+  if [[ "${#states[@]}" -ne 0 ]]; then
+    local IFS=', '
+    die "repository is in progress: ${states[*]}; finish or abort it before running git-quick-push"
+  fi
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  die "this command does not accept arguments"
+fi
+
+require_cmd git
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git repository"
+cd "$repo_root"
+
+require_clean_git_state
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || die "detached HEAD is not supported"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
+  die "branch '$branch' has no upstream; set one with: git push -u origin $branch"
+
+info "Checking upstream..."
+git fetch --prune
+
+local_rev="$(git rev-parse @)"
+remote_rev="$(git rev-parse '@{u}' 2>/dev/null)" ||
+  die "upstream '$upstream' is unavailable after fetch"
+base_rev="$(git merge-base @ '@{u}' 2>/dev/null)" ||
+  die "branch '$branch' and '$upstream' have no common history; resolve Git history first"
+
+if [[ "$local_rev" == "$remote_rev" ]]; then
+  :
+elif [[ "$local_rev" == "$base_rev" ]]; then
+  die "branch '$branch' is behind '$upstream'; run 'git pull --ff-only' first"
+elif [[ "$remote_rev" == "$base_rev" ]]; then
+  info "Branch has local commits not yet on upstream; they will be pushed too."
+else
+  die "branch '$branch' has diverged from '$upstream'; resolve Git history first"
+fi
+
+status="$(git status --short --untracked-files=all)"
+
+info "Repository: $repo_root"
+info "Branch: $branch"
+info "Upstream: $upstream"
+
+if [[ -z "$status" ]]; then
+  info "No changes to commit."
+  exit 0
+fi
+
+info "Changes that will be committed:"
+printf '%s\n' "$status"
+printf 'Continue and commit these changes? [y/N] '
+IFS= read -r confirm || confirm=""
+
+case "$confirm" in
+  y|Y)
+    ;;
+  *)
+    info "Aborted."
+    exit 1
+    ;;
+esac
+
+printf 'Commit message: '
+IFS= read -r commit_message || die "failed to read commit message"
+
+if [[ -z "${commit_message//[[:space:]]/}" ]]; then
+  die "empty commit message; aborting"
+fi
+
+current_status="$(git status --short --untracked-files=all)"
+if [[ "$current_status" != "$status" ]]; then
+  info "Current changes:"
+  printf '%s\n' "$current_status"
+  die "working tree changed after confirmation; rerun git-quick-push"
+fi
+
+git add -A
+
+staged_files="$(git diff --cached --name-only)"
+if [[ -z "$staged_files" ]]; then
+  die "no staged changes after git add -A; aborting"
+fi
+
+git commit -m "$commit_message"
+git push
+
+info "Committed and pushed successfully."
