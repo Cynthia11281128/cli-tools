@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: dvc-push-data
+
+Publish the current Git/DVC repository's data/ directory:
+  1. dvc add data
+  2. dvc push
+  3. git commit data.dvc/.gitignore
+  4. git push
+
+The command must be run inside a Git repository that has already been
+initialized with DVC and has a default DVC remote.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  die "this command does not accept arguments"
+fi
+
+require_cmd git
+require_cmd dvc
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git repository"
+cd "$repo_root"
+
+[[ -d .dvc ]] || die "DVC is not initialized in this repository; run 'dvc init' first"
+[[ -d data ]] || die "data/ directory not found in repository root: $repo_root"
+
+default_remote="$(dvc config core.remote 2>/dev/null || true)"
+[[ -n "$default_remote" ]] || die "no default DVC remote configured; run 'dvc remote add -d ...' first"
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || die "detached HEAD is not supported"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
+  die "branch '$branch' has no upstream; set one with 'git push -u origin $branch'"
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  git status --short >&2
+  die "working tree is not clean; commit, stash, or remove unrelated changes before publishing data"
+fi
+
+info "Repository: $repo_root"
+info "Branch: $branch tracking $upstream"
+info "DVC remote: $default_remote"
+
+info "Checking branch state..."
+git fetch --prune
+
+local_rev="$(git rev-parse @)"
+remote_rev="$(git rev-parse '@{u}')"
+base_rev="$(git merge-base @ '@{u}')"
+
+if [[ "$local_rev" == "$remote_rev" ]]; then
+  :
+elif [[ "$local_rev" == "$base_rev" ]]; then
+  die "branch '$branch' is behind '$upstream'; run 'git pull --ff-only' first"
+elif [[ "$remote_rev" == "$base_rev" ]]; then
+  die "branch '$branch' has unpushed commits; push or handle them before publishing data"
+else
+  die "branch '$branch' has diverged from '$upstream'; resolve Git history first"
+fi
+
+info "Updating DVC metadata for data/..."
+dvc add data
+
+status="$(git status --porcelain)"
+if [[ -z "$status" ]]; then
+  info "No Git metadata changes detected. Running dvc push..."
+  dvc push
+  info "DVC data pushed. No Git commit was needed."
+  exit 0
+fi
+
+bad_changes=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  path="${line:3}"
+  case "$path" in
+    data.dvc|.gitignore)
+      ;;
+    *)
+      bad_changes+=("$line")
+      ;;
+  esac
+done <<<"$status"
+
+if [[ "${#bad_changes[@]}" -ne 0 ]]; then
+  printf '%s\n' "${bad_changes[@]}" >&2
+  die "dvc add changed files other than data.dvc/.gitignore; refusing to continue"
+fi
+
+printf 'Commit message for DVC data update: '
+IFS= read -r commit_message || die "failed to read commit message"
+
+if [[ -z "${commit_message//[[:space:]]/}" ]]; then
+  die "empty commit message; aborting"
+fi
+
+info "Uploading data to DVC remote..."
+dvc push
+
+git add -- data.dvc .gitignore
+
+staged_files="$(git diff --cached --name-only)"
+if [[ -z "$staged_files" ]]; then
+  info "No staged Git metadata changes after dvc push."
+  exit 0
+fi
+
+while IFS= read -r path; do
+  case "$path" in
+    data.dvc|.gitignore)
+      ;;
+    *)
+      git diff --cached --name-status >&2
+      die "unexpected staged file: $path"
+      ;;
+  esac
+done <<<"$staged_files"
+
+git commit -m "$commit_message"
+git push
+
+info "DVC data and Git metadata pushed successfully."
