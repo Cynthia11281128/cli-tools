@@ -35,6 +35,35 @@ dvc_data_diff() {
     die "failed to inspect DVC data changes; ensure data.dvc exists and data/ is DVC-tracked"
 }
 
+print_dvc_data_diff_summary() {
+  local diff_text="$1"
+  local summary
+
+  summary="$(printf '%s\n' "$diff_text" | awk '/^files summary:/ { line = $0 } END { print line }')"
+
+  if [[ -n "$summary" ]]; then
+    printf '%s\n' "$summary"
+  else
+    printf 'DVC data changes detected.\n'
+  fi
+
+  printf 'Full file list hidden. To inspect it, run: dvc diff --targets data.dvc\n'
+}
+
+run_quiet() {
+  local log_file
+  log_file="$(mktemp)"
+
+  if "$@" >"$log_file" 2>&1; then
+    rm -f "$log_file"
+    return 0
+  fi
+
+  cat "$log_file" >&2
+  rm -f "$log_file"
+  return 1
+}
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
@@ -92,7 +121,7 @@ commit_message=""
 
 if [[ -n "$data_diff" ]]; then
   info "DVC data changes to publish:"
-  printf '%s\n' "$data_diff"
+  print_dvc_data_diff_summary "$data_diff"
   printf 'Continue and publish these data changes? [y/N] '
   IFS= read -r confirm || confirm=""
 
@@ -115,7 +144,7 @@ if [[ -n "$data_diff" ]]; then
   current_data_diff="$(dvc_data_diff)"
   if [[ "$current_data_diff" != "$data_diff" ]]; then
     info "Current DVC data changes:"
-    printf '%s\n' "$current_data_diff"
+    print_dvc_data_diff_summary "$current_data_diff"
     die "DVC data changed after confirmation; rerun dvc-push-data"
   fi
 else
@@ -123,12 +152,12 @@ else
 fi
 
 info "Updating DVC metadata for data/..."
-dvc add data
+run_quiet dvc add --quiet data
 
 status="$(git status --porcelain)"
 if [[ -z "$status" ]]; then
   info "No Git metadata changes detected. Running dvc push..."
-  dvc push
+  run_quiet dvc push --quiet
   info "DVC data pushed. No Git commit was needed."
   exit 0
 fi
@@ -161,7 +190,7 @@ if [[ -z "$commit_message" ]]; then
 fi
 
 info "Uploading data to DVC remote..."
-dvc push
+run_quiet dvc push --quiet
 
 git add -- data.dvc .gitignore
 
