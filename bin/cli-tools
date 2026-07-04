@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools
+  cli-tools list
+  cli-tools help
+  cli-tools command [args...]
+
+List or run commands from this cli-tools repository.
+
+Examples:
+  cli-tools list
+  cli-tools git-quick-push
+  cli-tools notify-done -- make test
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)"
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+
+[[ -d "$bin_dir" ]] || die "missing bin directory: $bin_dir"
+
+if [[ "$#" -eq 0 ]]; then
+  exec "$bin_dir/list"
+fi
+
+case "${1:-}" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  list)
+    exec "$bin_dir/list"
+    ;;
+esac
+
+command_name="$1"
+shift
+
+case "$command_name" in
+  */*|"")
+    die "invalid cli-tools command: $command_name"
+    ;;
+esac
+
+command_path="$bin_dir/$command_name"
+
+if [[ ! -x "$command_path" || ! -f "$command_path" ]]; then
+  die "unknown cli-tools command: $command_name; run 'cli-tools list'"
+fi
+
+exec "$command_path" "$@"

@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: list
+
+List executable commands available in this cli-tools repository.
+
+The command works from the repository checkout and from an installed symlink
+created by ./install.sh.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)"
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  die "this command does not accept arguments"
+fi
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+
+[[ -d "$bin_dir" ]] || die "missing bin directory: $bin_dir"
+
+commands=()
+while IFS= read -r source_cmd; do
+  commands+=("$(basename -- "$source_cmd")")
+done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
+
+if [[ "${#commands[@]}" -eq 0 ]]; then
+  die "no executable commands found in: $bin_dir"
+fi
+
+printf 'Available cli-tools:\n'
+printf '  %s\n' "${commands[@]}"

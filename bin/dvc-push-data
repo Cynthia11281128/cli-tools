@@ -6,10 +6,11 @@ usage() {
 Usage: dvc-push-data
 
 Publish the current Git/DVC repository's data/ directory:
-  1. dvc add data
-  2. dvc push
-  3. git commit data.dvc/.gitignore
-  4. git push
+  1. show DVC data changes and ask for confirmation
+  2. dvc add data
+  3. dvc push
+  4. git commit data.dvc/.gitignore
+  5. git push
 
 The command must be run inside a Git repository that has already been
 initialized with DVC and has a default DVC remote.
@@ -27,6 +28,11 @@ info() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+dvc_data_diff() {
+  dvc diff --targets data.dvc 2>/dev/null ||
+    die "failed to inspect DVC data changes; ensure data.dvc exists and data/ is DVC-tracked"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -81,6 +87,41 @@ else
   die "branch '$branch' has diverged from '$upstream'; resolve Git history first"
 fi
 
+data_diff="$(dvc_data_diff)"
+commit_message=""
+
+if [[ -n "$data_diff" ]]; then
+  info "DVC data changes to publish:"
+  printf '%s\n' "$data_diff"
+  printf 'Continue and publish these data changes? [y/N] '
+  IFS= read -r confirm || confirm=""
+
+  case "$confirm" in
+    y|Y)
+      ;;
+    *)
+      info "Aborted."
+      exit 1
+      ;;
+  esac
+
+  printf 'Commit message for DVC data update: '
+  IFS= read -r commit_message || die "failed to read commit message"
+
+  if [[ -z "${commit_message//[[:space:]]/}" ]]; then
+    die "empty commit message; aborting"
+  fi
+
+  current_data_diff="$(dvc_data_diff)"
+  if [[ "$current_data_diff" != "$data_diff" ]]; then
+    info "Current DVC data changes:"
+    printf '%s\n' "$current_data_diff"
+    die "DVC data changed after confirmation; rerun dvc-push-data"
+  fi
+else
+  info "No DVC data changes detected."
+fi
+
 info "Updating DVC metadata for data/..."
 dvc add data
 
@@ -110,11 +151,13 @@ if [[ "${#bad_changes[@]}" -ne 0 ]]; then
   die "dvc add changed files other than data.dvc/.gitignore; refusing to continue"
 fi
 
-printf 'Commit message for DVC data update: '
-IFS= read -r commit_message || die "failed to read commit message"
+if [[ -z "$commit_message" ]]; then
+  printf 'Commit message for DVC data update: '
+  IFS= read -r commit_message || die "failed to read commit message"
 
-if [[ -z "${commit_message//[[:space:]]/}" ]]; then
-  die "empty commit message; aborting"
+  if [[ -z "${commit_message//[[:space:]]/}" ]]; then
+    die "empty commit message; aborting"
+  fi
 fi
 
 info "Uploading data to DVC remote..."

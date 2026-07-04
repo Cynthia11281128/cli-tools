@@ -15,6 +15,9 @@ cd ~/cli-tools
 
 `install.sh` installs every executable command in `bin/` into a writable
 directory on `PATH` using symlinks.
+Open a new shell after installing; toolbox command completion is scoped to
+`cli-tools <Tab>` so direct tool names do not mix into normal command
+completion.
 
 To choose the install location explicitly:
 
@@ -22,57 +25,28 @@ To choose the install location explicitly:
 TOOLS_INSTALL_DIR=/path/to/bin ./install.sh
 ```
 
+After renaming or removing commands, reinstall from scratch:
+
+```bash
+./install.sh --reinstall
+```
+
 Verify installation:
 
 ```bash
-which dvc-push-data
-dvc-push-data --help
-dvc-pull-data --help
-git-quick-push --help
-notify-done --help
+cli-tools --help
 ```
 
 ## Commands
 
 | Command | Purpose | Typical use |
 |---|---|---|
-| `dvc-push-data` | Publish current `data/` through DVC and Git metadata. | `cd /path/to/repo && dvc-push-data` |
-| `dvc-pull-data` | Pull latest Git data pointer and DVC data. | `cd /path/to/repo && dvc-pull-data` |
-| `git-quick-push` | Review all Git changes, commit them, and push the branch. | `cd /path/to/repo && git-quick-push` |
-| `notify-done` | Run a command and send a desktop notification when it finishes. | `notify-done -- make test` |
-
-Both DVC commands must run inside a Git/DVC repository. They use conservative
-safety checks: the working tree must be clean, the branch must have an upstream,
-and unsafe Git states are rejected instead of being merged, rebased, stashed, or
-force-pushed automatically.
-
-`git-quick-push` must run inside a Git repository on a branch with an upstream.
-It shows the current branch, upstream, and all modified, deleted, and untracked
-files that will be committed. After you confirm with `y`, it asks for a commit
-message, runs `git add -A`, commits, and pushes:
-
-```bash
-git-quick-push
-```
-
-The command stops instead of modifying the repository when the branch has no
-upstream, is behind upstream, has diverged from upstream, or the repository is in
-the middle of merge/rebase/cherry-pick/revert work.
-
-`notify-done` requires `notify-send` and an active desktop notification session.
-It exits with the same status as the wrapped command:
-
-```bash
-notify-done sleep 10
-notify-done -- bash -lc 'cd /path/to/repo && make test'
-```
-
-To keep a short `n` shortcut, add this to your shell startup file after
-installing:
-
-```bash
-alias n=notify-done
-```
+| `cli-tools` | List or run toolbox commands with scoped subcommand completion. | `cli-tools list` |
+| `dvc-push-data` | Review `data/` changes, confirm, then run DVC push and Git metadata commit/push. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && dvc-push-data` |
+| `dvc-pull-data` | Pull latest Git data pointer and DVC data. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && dvc-pull-data` |
+| `git-quick-push` | Review modified/deleted/untracked files, confirm, then commit and push. Stops on unsafe Git states. | `cd /path/to/repo && git-quick-push` |
+| `list` | List executable commands available in this toolbox. | `list` |
+| `notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `notify-done -- make test` |
 
 ## Adding Tools
 
