@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: dvc-pull-data
+
+Pull the current Git/DVC repository's data/ directory:
+  1. git fetch --prune
+  2. git pull --ff-only if the branch is behind upstream
+  3. dvc pull data.dvc
+
+The command must be run inside a Git repository that has already been
+initialized with DVC and has a default DVC remote.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  die "this command does not accept arguments"
+fi
+
+require_cmd git
+require_cmd dvc
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git repository"
+cd "$repo_root"
+
+[[ -d .dvc ]] || die "DVC is not initialized in this repository; run 'dvc init' first"
+[[ -f data.dvc ]] || die "data.dvc not found in repository root: $repo_root"
+
+default_remote="$(dvc config core.remote 2>/dev/null || true)"
+[[ -n "$default_remote" ]] || die "no default DVC remote configured; run 'dvc remote add -d ...' first"
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || die "detached HEAD is not supported"
+upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
+  die "branch '$branch' has no upstream; set one with 'git push -u origin $branch'"
+
+if [[ -n "$(git status --porcelain)" ]]; then
+  git status --short >&2
+  die "working tree is not clean; commit, stash, or remove unrelated changes before pulling data"
+fi
+
+info "Repository: $repo_root"
+info "Branch: $branch tracking $upstream"
+info "DVC remote: $default_remote"
+
+info "Checking branch state..."
+git fetch --prune
+
+local_rev="$(git rev-parse @)"
+remote_rev="$(git rev-parse '@{u}')"
+base_rev="$(git merge-base @ '@{u}')"
+
+if [[ "$local_rev" == "$remote_rev" ]]; then
+  info "Branch is already synced with upstream."
+elif [[ "$local_rev" == "$base_rev" ]]; then
+  info "Branch is behind upstream. Fast-forwarding..."
+  git pull --ff-only
+elif [[ "$remote_rev" == "$base_rev" ]]; then
+  die "branch '$branch' has unpushed commits; push or handle them before pulling data"
+else
+  die "branch '$branch' has diverged from '$upstream'; resolve Git history first"
+fi
+
+info "Pulling DVC data for data.dvc..."
+dvc pull data.dvc
+
+info "DVC data pulled successfully."

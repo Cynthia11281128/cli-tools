@@ -27,35 +27,20 @@ Verify installation:
 ```bash
 which dvc-push-data
 dvc-push-data --help
+dvc-pull-data --help
 ```
 
 ## Commands
 
-- `dvc-push-data`: publish the current Git/DVC repository's `data/` directory.
+| Command | Purpose | Typical use |
+|---|---|---|
+| `dvc-push-data` | Publish current `data/` through DVC and Git metadata. | `cd /path/to/repo && dvc-push-data` |
+| `dvc-pull-data` | Pull latest Git data pointer and DVC data. | `cd /path/to/repo && dvc-pull-data` |
 
-## dvc-push-data
-
-Run inside a Git repository that already uses DVC:
-
-```bash
-cd /path/to/project
-dvc-push-data
-```
-
-The command publishes the repository's `data/` directory:
-
-1. `dvc add data`
-2. `dvc push`
-3. commit `data.dvc` and `.gitignore`
-4. `git push`
-
-Safety rules:
-
-- The Git working tree must be clean before the command starts.
-- The current branch must have an upstream.
-- The current branch must be exactly synced with its upstream.
-- The command refuses to commit files other than `data.dvc` and `.gitignore`.
-- The Git commit message is requested interactively every time.
+Both DVC commands must run inside a Git/DVC repository. They use conservative
+safety checks: the working tree must be clean, the branch must have an upstream,
+and unsafe Git states are rejected instead of being merged, rebased, stashed, or
+force-pushed automatically.
 
 ## Adding Tools
 
