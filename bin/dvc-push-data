@@ -47,7 +47,78 @@ print_dvc_data_diff_summary() {
     printf 'DVC data changes detected.\n'
   fi
 
+  print_dvc_data_diff_folders "$diff_text"
   printf 'Full file list hidden. To inspect it, run: dvc diff --targets data.dvc\n'
+}
+
+print_dvc_data_diff_folders() {
+  local diff_text="$1"
+  local max_folders="${DVC_PUSH_DATA_MAX_FOLDERS:-30}"
+  local folders
+
+  folders="$(
+    printf '%s\n' "$diff_text" |
+      awk '
+        /^(Added|Deleted|Modified):$/ {
+          section = substr($1, 1, length($1) - 1)
+          next
+        }
+
+        /^files summary:/ {
+          section = ""
+          next
+        }
+
+        /^[[:space:]]+data(\/|$)/ && section != "" {
+          path = $0
+          sub(/^[[:space:]]+/, "", path)
+
+          if (path == "data" || path == "data/") {
+            next
+          }
+
+          is_dir = path ~ /\/$/
+          sub(/\/$/, "", path)
+
+          if (is_dir) {
+            folder = path
+          } else {
+            folder = path
+            sub(/\/[^\/]*$/, "", folder)
+          }
+
+          if (folder == "") {
+            folder = "data"
+          }
+
+          print section ": " folder "/"
+        }
+      ' |
+      sort -u
+  )"
+
+  if [[ -z "$folders" ]]; then
+    return 0
+  fi
+
+  printf 'Changed folders:\n'
+  printf '%s\n' "$folders" |
+    awk -v max_folders="$max_folders" '
+      NR <= max_folders {
+        printf "  %s\n", $0
+        next
+      }
+
+      {
+        hidden += 1
+      }
+
+      END {
+        if (hidden > 0) {
+          printf "  ... %d more folders hidden\n", hidden
+        }
+      }
+    '
 }
 
 run_quiet() {
