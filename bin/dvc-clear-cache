@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: dvc-clear-cache
+
+Preview and confirm cleanup of the current Git/DVC repository's local cache:
+  1. dvc gc -w --dry
+  2. ask for confirmation
+  3. dvc gc -w --force
+
+This only removes local DVC cache objects that are not needed by the current
+workspace. It does not delete workspace files in data/ and never cleans DVC
+remote storage.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+info() {
+  printf '%s\n' "$*"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  die "this command does not accept arguments"
+fi
+
+require_cmd git
+require_cmd dvc
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Git repository"
+cd "$repo_root"
+
+[[ -d .dvc ]] || die "DVC is not initialized in this repository; run 'dvc init' first"
+
+branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" || die "detached HEAD is not supported"
+
+info "Repository: $repo_root"
+info "Branch: $branch"
+info ""
+info "This command only cleans local DVC cache for the current workspace."
+info "It does not delete workspace files such as data/."
+info "It does not clean DVC remote storage."
+info "After cleanup, old Git commits may require 'dvc pull' to restore old data."
+info ""
+info "Previewing local cache cleanup..."
+
+dvc gc -w --dry
+
+printf 'Proceed with local cache cleanup? [y/N] '
+IFS= read -r confirm || confirm=""
+
+case "$confirm" in
+  y|Y)
+    ;;
+  *)
+    info "Aborted."
+    exit 1
+    ;;
+esac
+
+info "Cleaning local DVC cache..."
+dvc gc -w --force
+
+info "Local DVC cache cleanup complete."
