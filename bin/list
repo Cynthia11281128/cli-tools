@@ -3,9 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: list
+Usage:
+  cli-tools list
+  list
 
-List executable commands available in this cli-tools repository.
+List executable subcommands available in this cli-tools repository.
 
 The command works from the repository checkout and from an installed symlink
 created by ./install.sh.
@@ -53,12 +55,14 @@ bin_dir="$(dirname -- "$script_path")"
 
 commands=()
 while IFS= read -r source_cmd; do
-  commands+=("$(basename -- "$source_cmd")")
+  name="$(basename -- "$source_cmd")"
+  [[ "$name" == "cli-tools" ]] && continue
+  commands+=("$name")
 done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
 
 if [[ "${#commands[@]}" -eq 0 ]]; then
-  die "no executable commands found in: $bin_dir"
+  die "no executable subcommands found in: $bin_dir"
 fi
 
-printf 'Available cli-tools:\n'
+printf 'Available cli-tools subcommands:\n'
 printf '  %s\n' "${commands[@]}"

@@ -40,21 +40,6 @@ _cli_tools_candidates() {
   done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
 }
 
-_cli_tools_hidden_initial_commands() {
-  local completion_path repo_dir bin_dir source_cmd name
-  completion_path="$(_cli_tools_resolve_path "${BASH_SOURCE[0]}")" || return 0
-  repo_dir="$(CDPATH= cd -- "$(dirname -- "$completion_path")/.." 2>/dev/null && pwd)" || return 0
-  bin_dir="$repo_dir/bin"
-
-  [[ -d "$bin_dir" ]] || return 0
-
-  while IFS= read -r source_cmd; do
-    name="$(basename -- "$source_cmd")"
-    [[ "$name" == "cli-tools" ]] && continue
-    printf '%s\n' "$name"
-  done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
-}
-
 _cli_tools_completion() {
   local cur candidates
   cur="${COMP_WORDS[COMP_CWORD]:-}"
@@ -72,25 +57,4 @@ _cli_tools_completion() {
   COMPREPLY=()
 }
 
-_cli_tools_initial_completion() {
-  local cur candidates hidden
-  cur="${COMP_WORDS[COMP_CWORD]:-}"
-
-  if [[ "$cur" == */* ]]; then
-    mapfile -t COMPREPLY < <(compgen -f -- "$cur")
-    compopt -o filenames 2>/dev/null || true
-    return 0
-  fi
-
-  candidates="$(compgen -c -- "$cur" | sort -u)"
-  hidden="$(_cli_tools_hidden_initial_commands | sort -u)"
-
-  if [[ -n "$hidden" ]]; then
-    candidates="$(comm -23 <(printf '%s\n' "$candidates") <(printf '%s\n' "$hidden"))"
-  fi
-
-  mapfile -t COMPREPLY < <(printf '%s\n' "$candidates")
-}
-
 complete -F _cli_tools_completion cli-tools
-complete -I -F _cli_tools_initial_completion

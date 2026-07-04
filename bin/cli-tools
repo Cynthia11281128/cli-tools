@@ -56,9 +56,6 @@ case "${1:-}" in
     usage
     exit 0
     ;;
-  list)
-    exec "$bin_dir/list"
-    ;;
 esac
 
 command_name="$1"

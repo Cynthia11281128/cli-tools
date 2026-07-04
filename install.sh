@@ -11,12 +11,13 @@ usage() {
 Usage:
   ./install.sh
   ./install.sh --reinstall
+  ./install.sh --check
 
-Install executable commands from bin/ onto PATH using symlinks.
+Install the cli-tools entrypoint onto PATH using a symlink.
 
 Options:
-  --reinstall  Remove existing symlinks in the install directory that point to
-               this repository's bin/ directory, then install current commands.
+  --reinstall  Reinstall the cli-tools entrypoint and Bash completion.
+  --check      Check whether cli-tools and its Bash completion are installed.
   -h, --help   Show this help.
 USAGE
 }
@@ -24,13 +25,6 @@ USAGE
 path_contains() {
   case ":$PATH:" in
     *":$1:"*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-path_starts_with() {
-  case "$1" in
-    "$2"/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -75,15 +69,127 @@ configure_completion_startup() {
   printf 'Configured completion startup: %s\n' "$startup_file"
 }
 
+select_install_dir() {
+  if [[ -n "${TOOLS_INSTALL_DIR:-}" ]]; then
+    printf '%s\n' "$TOOLS_INSTALL_DIR"
+  elif [[ -d "$HOME/.local/bin" && -w "$HOME/.local/bin" ]] && path_contains "$HOME/.local/bin"; then
+    printf '%s\n' "$HOME/.local/bin"
+  elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/bin" && -w "$CONDA_PREFIX/bin" ]] && path_contains "$CONDA_PREFIX/bin"; then
+    printf '%s\n' "$CONDA_PREFIX/bin"
+  elif [[ -d "$HOME/miniconda3/bin" && -w "$HOME/miniconda3/bin" ]] && path_contains "$HOME/miniconda3/bin"; then
+    printf '%s\n' "$HOME/miniconda3/bin"
+  else
+    printf '%s\n' "$HOME/.local/bin"
+  fi
+}
+
+completion_target_path() {
+  local completion_base="${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion}"
+  printf '%s/completions/cli-tools\n' "$completion_base"
+}
+
+ensure_installable_symlink() {
+  local target="$1"
+  local source="$2"
+  local label="$3"
+  local existing
+
+  if [[ -e "$target" || -L "$target" ]]; then
+    existing="$(readlink "$target" 2>/dev/null || true)"
+    if [[ "$existing" != "$source" ]]; then
+      die "refusing to overwrite existing $label: $target"
+    fi
+  fi
+}
+
+install_symlink() {
+  local source="$1"
+  local target="$2"
+  local label="$3"
+
+  mkdir -p "$(dirname -- "$target")"
+  [[ -w "$(dirname -- "$target")" ]] || die "$label directory is not writable: $(dirname -- "$target")"
+  ensure_installable_symlink "$target" "$source" "$label"
+  ln -sfn "$source" "$target"
+  printf 'Installed %s: %s -> %s\n' "$label" "$target" "$source"
+}
+
+issues=()
+
+add_issue() {
+  issues+=("$*")
+}
+
+check_expected_symlink() {
+  local target="$1"
+  local source="$2"
+  local label="$3"
+  local existing
+
+  if [[ ! -e "$target" && ! -L "$target" ]]; then
+    add_issue "missing $label: $target"
+    return 0
+  fi
+
+  if [[ ! -L "$target" ]]; then
+    add_issue "conflict: $target exists but is not a symlink"
+    return 0
+  fi
+
+  existing="$(readlink "$target" 2>/dev/null || true)"
+  if [[ "$existing" != "$source" ]]; then
+    add_issue "conflict: $target points to $existing; expected $source"
+  fi
+}
+
+run_check() {
+  local cli_tools_target="$1"
+  local cli_tools_src="$2"
+  local completion_target="$3"
+  local completion_src="$4"
+  local resolved
+
+  check_expected_symlink "$cli_tools_target" "$cli_tools_src" "command"
+
+  resolved="$(command -v cli-tools 2>/dev/null || true)"
+  if [[ "$resolved" != "$cli_tools_target" ]]; then
+    if [[ -z "$resolved" ]]; then
+      add_issue "PATH does not resolve cli-tools; expected $cli_tools_target"
+    else
+      add_issue "PATH resolves cli-tools to $resolved; expected $cli_tools_target"
+    fi
+  fi
+
+  if [[ -f "$completion_src" ]]; then
+    check_expected_symlink "$completion_target" "$completion_src" "completion"
+  fi
+
+  if [[ "${#issues[@]}" -eq 0 ]]; then
+    printf 'Install check passed.\n'
+    return 0
+  fi
+
+  printf 'Install check failed:\n' >&2
+  printf '  - %s\n' "${issues[@]}" >&2
+  printf 'Run ./install.sh --reinstall after resolving conflicts.\n' >&2
+  return 1
+}
+
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 bin_dir="$script_dir/bin"
+cli_tools_src="$bin_dir/cli-tools"
 completion_src="$script_dir/completions/cli-tools"
-reinstall=0
+mode="install"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --reinstall)
-      reinstall=1
+      [[ "$mode" == "install" ]] || die "only one mode can be selected"
+      mode="reinstall"
+      ;;
+    --check)
+      [[ "$mode" == "install" ]] || die "only one mode can be selected"
+      mode="check"
       ;;
     -h|--help)
       usage
@@ -98,71 +204,21 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 [[ -d "$bin_dir" ]] || die "missing bin directory: $bin_dir"
+[[ -x "$cli_tools_src" && -f "$cli_tools_src" ]] || die "missing executable entrypoint: $cli_tools_src"
 
-if [[ -n "${TOOLS_INSTALL_DIR:-}" ]]; then
-  install_dir="$TOOLS_INSTALL_DIR"
-elif [[ -d "$HOME/.local/bin" && -w "$HOME/.local/bin" ]] && path_contains "$HOME/.local/bin"; then
-  install_dir="$HOME/.local/bin"
-elif [[ -n "${CONDA_PREFIX:-}" && -d "$CONDA_PREFIX/bin" && -w "$CONDA_PREFIX/bin" ]] && path_contains "$CONDA_PREFIX/bin"; then
-  install_dir="$CONDA_PREFIX/bin"
-elif [[ -d "$HOME/miniconda3/bin" && -w "$HOME/miniconda3/bin" ]] && path_contains "$HOME/miniconda3/bin"; then
-  install_dir="$HOME/miniconda3/bin"
-else
-  install_dir="$HOME/.local/bin"
+install_dir="$(select_install_dir)"
+cli_tools_target="$install_dir/cli-tools"
+completion_target="$(completion_target_path)"
+
+if [[ "$mode" == "check" ]]; then
+  run_check "$cli_tools_target" "$cli_tools_src" "$completion_target" "$completion_src"
+  exit $?
 fi
 
-mkdir -p "$install_dir"
-[[ -w "$install_dir" ]] || die "install directory is not writable: $install_dir"
-
-if [[ "$reinstall" -eq 1 ]]; then
-  while IFS= read -r target; do
-    existing="$(readlink "$target" 2>/dev/null || true)"
-    if path_starts_with "$existing" "$bin_dir"; then
-      rm -- "$target"
-      printf 'Removed: %s -> %s\n' "$target" "$existing"
-    fi
-  done < <(find "$install_dir" -maxdepth 1 -type l | sort)
-fi
-
-installed=0
-
-while IFS= read -r source_cmd; do
-  name="$(basename "$source_cmd")"
-  target="$install_dir/$name"
-
-  if [[ -e "$target" || -L "$target" ]]; then
-    existing="$(readlink "$target" 2>/dev/null || true)"
-    if [[ "$existing" != "$source_cmd" ]]; then
-      die "refusing to overwrite existing command: $target"
-    fi
-  fi
-
-  ln -sfn "$source_cmd" "$target"
-  printf 'Installed: %s -> %s\n' "$target" "$source_cmd"
-  installed=$((installed + 1))
-done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
-
-if [[ "$installed" -eq 0 ]]; then
-  die "no executable commands found in: $bin_dir"
-fi
+install_symlink "$cli_tools_src" "$cli_tools_target" "command"
 
 if [[ -f "$completion_src" ]]; then
-  completion_base="${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion}"
-  completion_install_dir="$completion_base/completions"
-  completion_target="$completion_install_dir/cli-tools"
-
-  mkdir -p "$completion_install_dir"
-  [[ -w "$completion_install_dir" ]] || die "completion directory is not writable: $completion_install_dir"
-
-  if [[ -e "$completion_target" || -L "$completion_target" ]]; then
-    existing="$(readlink "$completion_target" 2>/dev/null || true)"
-    if [[ "$existing" != "$completion_src" ]]; then
-      die "refusing to overwrite existing completion: $completion_target"
-    fi
-  fi
-
-  ln -sfn "$completion_src" "$completion_target"
-  printf 'Installed completion: %s -> %s\n' "$completion_target" "$completion_src"
+  install_symlink "$completion_src" "$completion_target" "completion"
   configure_completion_startup "$completion_target"
 fi
 

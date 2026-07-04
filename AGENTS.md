@@ -1,15 +1,15 @@
 # Agent Guide
 
-This repository is a personal command-line toolbox. Every tool added here
-should be installable and directly callable from the shell, just like
-`dvc-push-data`.
+This repository is a personal command-line toolbox. User-facing tools live in
+`bin/` and are exposed through the installed `cli-tools` entrypoint.
 
 ## Repository Contract
 
 - Put user-facing commands in `bin/`.
 - Each file in `bin/` should be a standalone executable command.
 - Command names should be stable, lowercase, and hyphen-separated.
-- `install.sh` installs commands from `bin/` onto `PATH` using symlinks.
+- `install.sh` installs only `bin/cli-tools` onto `PATH` using a symlink.
+- `cli-tools` dispatches subcommands from this repository's `bin/` directory.
 - `README.md` explains how to install the toolbox and how to use each command.
 - Avoid project-specific absolute paths unless a command is explicitly
   documented as project-specific.
@@ -19,8 +19,8 @@ should be installable and directly callable from the shell, just like
 When adding a tool, make it usable with this pattern:
 
 ```bash
-tool-name --help
-tool-name [arguments]
+cli-tools tool-name --help
+cli-tools tool-name [arguments]
 ```
 
 Checklist:
@@ -32,7 +32,7 @@ Checklist:
 - Print clear errors to stderr and exit non-zero on failure.
 - Keep default behavior conservative and reversible.
 - Update `README.md` with install and usage examples.
-- Ensure `./install.sh` installs the command without special cases.
+- Ensure `cli-tools list` discovers the command without special cases.
 
 ## Script Style
 
@@ -49,12 +49,12 @@ Prefer small functions for repeated behavior such as `die`, `usage`, and
 
 ## Installation Rules
 
-- Installation should create symlinks from an install directory to files in
-  this repository's `bin/`.
+- Installation should create one symlink from an install directory to
+  `bin/cli-tools`.
 - Prefer a writable directory that is already on `PATH`.
 - Honor `TOOLS_INSTALL_DIR` when it is set.
-- Do not overwrite an existing command unless it already points to the same
-  file in this repository.
+- Do not overwrite an existing `cli-tools` command unless it already points to
+  this repository's `bin/cli-tools`.
 - A freshly cloned copy of this repository should work after running:
 
   ```bash
