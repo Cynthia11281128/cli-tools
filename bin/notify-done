@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  notify-done --help
+  notify-done [--] command [args...]
+
+Run a command and send a desktop notification when it finishes.
+
+Examples:
+  notify-done sleep 10
+  notify-done -- make test
+  notify-done -- bash -lc 'cd /path/to/repo && make test'
+
+To keep a short shell shortcut:
+  alias n=notify-done
+
+Desktop notifications require notify-send and an active desktop notification
+session. Shell aliases and non-exported functions from the calling shell are not
+available to this standalone command; use bash -lc when you need shell syntax.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+warn() {
+  printf 'warning: %s\n' "$*" >&2
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+format_cmd() {
+  local formatted=()
+  local arg
+
+  for arg in "$@"; do
+    printf -v arg '%q' "$arg"
+    formatted+=("$arg")
+  done
+
+  local IFS=' '
+  printf '%s' "${formatted[*]}"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+if [[ "$#" -eq 0 ]]; then
+  usage >&2
+  die "missing command to run"
+fi
+
+require_cmd notify-send
+
+cmd="$(format_cmd "$@")"
+SECONDS=0
+
+if "$@"; then
+  code=0
+else
+  code=$?
+fi
+
+elapsed="$SECONDS"
+
+if ! notify-send "命令完成" "$cmd
+退出码: $code
+用时: ${elapsed}s"; then
+  warn "failed to send desktop notification"
+fi
+
+exit "$code"

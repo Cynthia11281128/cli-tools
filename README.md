@@ -28,6 +28,7 @@ Verify installation:
 which dvc-push-data
 dvc-push-data --help
 dvc-pull-data --help
+notify-done --help
 ```
 
 ## Commands
@@ -36,11 +37,27 @@ dvc-pull-data --help
 |---|---|---|
 | `dvc-push-data` | Publish current `data/` through DVC and Git metadata. | `cd /path/to/repo && dvc-push-data` |
 | `dvc-pull-data` | Pull latest Git data pointer and DVC data. | `cd /path/to/repo && dvc-pull-data` |
+| `notify-done` | Run a command and send a desktop notification when it finishes. | `notify-done -- make test` |
 
 Both DVC commands must run inside a Git/DVC repository. They use conservative
 safety checks: the working tree must be clean, the branch must have an upstream,
 and unsafe Git states are rejected instead of being merged, rebased, stashed, or
 force-pushed automatically.
+
+`notify-done` requires `notify-send` and an active desktop notification session.
+It exits with the same status as the wrapped command:
+
+```bash
+notify-done sleep 10
+notify-done -- bash -lc 'cd /path/to/repo && make test'
+```
+
+To keep a short `n` shortcut, add this to your shell startup file after
+installing:
+
+```bash
+alias n=notify-done
+```
 
 ## Adding Tools
 
