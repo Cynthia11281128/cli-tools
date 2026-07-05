@@ -44,6 +44,7 @@ completion is missing or broken.
 | `cli-tools git-quick-push` | Review modified/deleted/untracked files, confirm, then commit and push. Stops on unsafe Git states. | `cd /path/to/repo && cli-tools git-quick-push` |
 | `cli-tools list` | List executable subcommands available in this toolbox. | `cli-tools list` |
 | `cli-tools notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `cli-tools notify-done -- make test` |
+| `cli-tools ssh-tunnel` | Open SSH local port forwards for ports you enter, print local URLs, and use `CLI_TOOLS_SSH_REMOTE` from local `.env`. | `cli-tools ssh-tunnel` |
 
 ## Adding Tools
 

@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools ssh-tunnel
+  cli-tools ssh-tunnel --help
+
+Create SSH local port forwards using CLI_TOOLS_SSH_REMOTE from .env.
+After you enter ports, the command prints local URLs you can open.
+
+Example input:
+  8087 8088
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)"
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+strip_matching_quotes() {
+  local value="$1"
+  local length="${#value}"
+
+  if [[ "$length" -ge 2 ]]; then
+    if [[ "${value:0:1}" == '"' && "${value:length-1:1}" == '"' ]]; then
+      value="${value:1:length-2}"
+    elif [[ "${value:0:1}" == "'" && "${value:length-1:1}" == "'" ]]; then
+      value="${value:1:length-2}"
+    fi
+  fi
+
+  printf '%s\n' "$value"
+}
+
+load_remote() {
+  local env_file="$1"
+  local line remote=""
+
+  [[ -f "$env_file" ]] || die "missing .env file: $env_file"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*) continue ;;
+      CLI_TOOLS_SSH_REMOTE=*)
+        remote="${line#CLI_TOOLS_SSH_REMOTE=}"
+        ;;
+    esac
+  done <"$env_file"
+
+  remote="$(strip_matching_quotes "$remote")"
+
+  [[ -n "$remote" ]] || die "missing CLI_TOOLS_SSH_REMOTE in $env_file"
+  case "$remote" in
+    *[[:space:]]*) die "CLI_TOOLS_SSH_REMOTE must not contain whitespace" ;;
+  esac
+
+  printf '%s\n' "$remote"
+}
+
+is_port_number() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  (( port >= 1 && port <= 65535 ))
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  die "this command does not accept arguments"
+fi
+
+require_cmd ssh
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+repo_root="$(CDPATH= cd -- "$(dirname -- "$script_path")/.." && pwd)"
+remote="$(load_remote "$repo_root/.env")"
+
+printf 'Ports to forward, separated by spaces: '
+if ! IFS= read -r ports_line; then
+  die "failed to read ports"
+fi
+
+ports=()
+declare -A seen_ports=()
+
+for port in $ports_line; do
+  is_port_number "$port" || die "invalid port: $port"
+  [[ -z "${seen_ports[$port]:-}" ]] || die "duplicate port: $port"
+  seen_ports[$port]=1
+  ports+=("$port")
+done
+
+[[ "${#ports[@]}" -gt 0 ]] || die "at least one port is required"
+
+ssh_args=(-N)
+for port in "${ports[@]}"; do
+  ssh_args+=(-L "$port:127.0.0.1:$port")
+done
+ssh_args+=("$remote")
+
+printf 'Open:\n'
+for port in "${ports[@]}"; do
+  printf '  http://127.0.0.1:%s/\n' "$port"
+done
+
+printf 'Starting SSH tunnel to %s. Press Ctrl-C to stop.\n' "$remote"
+exec ssh "${ssh_args[@]}"
