@@ -45,7 +45,7 @@ completion is missing or broken.
 | `cli-tools list` | List executable subcommands available in this toolbox. | `cli-tools list` |
 | `cli-tools notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `cli-tools notify-done -- make test` |
 | `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
-| `cli-tools port-list` | List named port services started and managed by `cli-tools port-start`. | `cli-tools port-list` |
+| `cli-tools port-list` | List local named port services, or use `--remote` to list them over SSH with `CLI_TOOLS_SSH_REMOTE` from `.env`. | `cli-tools port-list --remote` |
 | `cli-tools port-stop` | Stop a named port service managed by cli-tools. | `cli-tools port-stop viewer` |
 | `cli-tools port-clear-cache` | Clear named port registry and logs when no managed port services are active. | `cli-tools port-clear-cache` |
 | `cli-tools ssh-tunnel` | Open SSH local port forwards for ports you enter, print local URLs, and use `CLI_TOOLS_SSH_REMOTE` from local `.env`. | `cli-tools ssh-tunnel` |
@@ -58,6 +58,7 @@ later:
 ```bash
 cli-tools port-start viewer 7860 -- python visualize_web/server.py --port 7860
 cli-tools port-list
+cli-tools port-list --remote
 cli-tools port-stop viewer
 cli-tools port-clear-cache
 ```
@@ -65,6 +66,9 @@ cli-tools port-clear-cache
 `port-start` requires `--` before the command it should run. Names may contain
 only letters, numbers, `.`, `_`, and `-`. `port-stop` only stops services in the
 cli-tools registry; it does not kill arbitrary processes by port number.
+`port-list --remote` runs `cli-tools port-list` on the SSH target configured as
+`CLI_TOOLS_SSH_REMOTE` in local `.env`; set `CLI_TOOLS_REMOTE_CLI` there if the
+remote `cli-tools` command is not on PATH.
 
 ## Adding Tools
 

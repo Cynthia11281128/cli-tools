@@ -5,12 +5,23 @@ usage() {
   cat <<'USAGE'
 Usage:
   cli-tools port-list
+  cli-tools port-list --remote
   port-list
 
 List named port services managed by cli-tools.
 
 Only services started with `cli-tools port-start` are shown.
+With --remote, read CLI_TOOLS_SSH_REMOTE from .env and run port-list over SSH.
 USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
 resolve_self() {
@@ -32,6 +43,79 @@ resolve_self() {
   printf '%s/%s\n' "$dir" "$(basename -- "$source")"
 }
 
+strip_matching_quotes() {
+  local value="$1"
+  local length="${#value}"
+
+  if [[ "$length" -ge 2 ]]; then
+    if [[ "${value:0:1}" == '"' && "${value:length-1:1}" == '"' ]]; then
+      value="${value:1:length-2}"
+    elif [[ "${value:0:1}" == "'" && "${value:length-1:1}" == "'" ]]; then
+      value="${value:1:length-2}"
+    fi
+  fi
+
+  printf '%s\n' "$value"
+}
+
+load_env_value() {
+  local env_file="$1"
+  local key="$2"
+  local line value=""
+
+  [[ -f "$env_file" ]] || die "missing .env file: $env_file"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*) continue ;;
+      "$key"=*)
+        value="${line#"$key"=}"
+        ;;
+    esac
+  done <"$env_file"
+
+  strip_matching_quotes "$value"
+}
+
+run_remote_port_list() {
+  local env_file="$repo_dir/.env"
+  local remote remote_cli remote_command
+
+  require_cmd ssh
+
+  remote="$(load_env_value "$env_file" "CLI_TOOLS_SSH_REMOTE")"
+  [[ -n "$remote" ]] || die "missing CLI_TOOLS_SSH_REMOTE in $env_file"
+  case "$remote" in
+    *[[:space:]]*) die "CLI_TOOLS_SSH_REMOTE must not contain whitespace" ;;
+  esac
+
+  remote_cli="$(load_env_value "$env_file" "CLI_TOOLS_REMOTE_CLI")"
+  if [[ -z "$remote_cli" ]]; then
+    remote_command='
+if command -v cli-tools >/dev/null 2>&1; then
+  exec cli-tools port-list
+elif [ -x "$HOME/cli-tools/bin/cli-tools" ]; then
+  exec "$HOME/cli-tools/bin/cli-tools" port-list
+elif [ -x "$HOME/.local/bin/cli-tools" ]; then
+  exec "$HOME/.local/bin/cli-tools" port-list
+elif [ -x "$HOME/miniconda3/bin/cli-tools" ]; then
+  exec "$HOME/miniconda3/bin/cli-tools" port-list
+fi
+
+printf "%s\n" "error: remote cli-tools not found; set CLI_TOOLS_REMOTE_CLI in local .env to the remote cli-tools path" >&2
+exit 127
+'
+    printf 'Remote named port services on %s:\n' "$remote"
+    exec ssh "$remote" "$remote_command"
+  fi
+  case "$remote_cli" in
+    *[[:space:]]*) die "CLI_TOOLS_REMOTE_CLI must not contain whitespace" ;;
+  esac
+
+  printf 'Remote named port services on %s:\n' "$remote"
+  exec ssh "$remote" "$remote_cli" port-list
+}
+
 script_path="$(resolve_self "${BASH_SOURCE[0]}")" || {
   printf 'error: failed to resolve script path\n' >&2
   exit 1
@@ -42,18 +126,22 @@ repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || {
   exit 1
 }
 
-# shellcheck source=../lib/port-registry.bash
-source "$repo_dir/lib/port-registry.bash"
-
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
+if [[ "$#" -eq 1 && "${1:-}" == "--remote" ]]; then
+  run_remote_port_list
+fi
+
 if [[ "$#" -ne 0 ]]; then
   usage >&2
-  port_die "this command does not accept arguments"
+  die "expected no arguments or --remote"
 fi
+
+# shellcheck source=../lib/port-registry.bash
+source "$repo_dir/lib/port-registry.bash"
 
 port_registry_lock
 port_registry_cleanup_stale

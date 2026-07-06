@@ -285,8 +285,8 @@ port_registry_count_entries() {
 port_registry_print_entries() {
   local name port pid start_time log_path command_text status
 
-  printf '%-20s %-6s %-10s %-8s %-25s %-40s %s\n' \
-    "NAME" "PORT" "STATUS" "PID" "STARTED" "LOG" "COMMAND"
+  printf '%-20s %-6s %-10s %-8s %-25s %s\n' \
+    "NAME" "PORT" "STATUS" "PID" "STARTED" "LOG"
 
   while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
     [[ -n "$name" ]] || continue
@@ -294,8 +294,9 @@ port_registry_print_entries() {
     if port_is_listening "$port"; then
       status="listening"
     fi
-    printf '%-20s %-6s %-10s %-8s %-25s %-40s %s\n' \
-      "$name" "$port" "$status" "$pid" "$start_time" "$log_path" "$command_text"
+    printf '%-20s %-6s %-10s %-8s %-25s %s\n' \
+      "$name" "$port" "$status" "$pid" "$start_time" "$log_path"
+    printf '  command: %s\n' "$command_text"
   done <"$PORT_REGISTRY"
 }
 
