@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools port-list
+  port-list
+
+List named port services managed by cli-tools.
+
+Only services started with `cli-tools port-start` are shown.
+USAGE
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || {
+  printf 'error: failed to resolve script path\n' >&2
+  exit 1
+}
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || {
+  printf 'error: failed to resolve cli-tools root\n' >&2
+  exit 1
+}
+
+# shellcheck source=../lib/port-registry.bash
+source "$repo_dir/lib/port-registry.bash"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 0 ]]; then
+  usage >&2
+  port_die "this command does not accept arguments"
+fi
+
+port_registry_lock
+port_registry_cleanup_stale
+
+if [[ "$(port_registry_count_entries)" -eq 0 ]]; then
+  printf 'No named port services.\n'
+  exit 0
+fi
+
+port_registry_print_entries

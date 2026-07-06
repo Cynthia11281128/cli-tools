@@ -44,6 +44,26 @@ completion is missing or broken.
 | `cli-tools git-quick-push` | Review modified/deleted/untracked files, confirm, then commit and push. Stops on unsafe Git states. | `cd /path/to/repo && cli-tools git-quick-push` |
 | `cli-tools list` | List executable subcommands available in this toolbox. | `cli-tools list` |
 | `cli-tools notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `cli-tools notify-done -- make test` |
+| `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
+| `cli-tools port-list` | List named port services started and managed by `cli-tools port-start`. | `cli-tools port-list` |
+| `cli-tools port-stop` | Stop a named port service managed by cli-tools. | `cli-tools port-stop viewer` |
+| `cli-tools port-clear-cache` | Clear named port registry and logs when no managed port services are active. | `cli-tools port-clear-cache` |
+
+## Named Ports
+
+Use named ports for local web services that should be easy to find and stop
+later:
+
+```bash
+cli-tools port-start viewer 7860 -- python visualize_web/server.py --port 7860
+cli-tools port-list
+cli-tools port-stop viewer
+cli-tools port-clear-cache
+```
+
+`port-start` requires `--` before the command it should run. Names may contain
+only letters, numbers, `.`, `_`, and `-`. `port-stop` only stops services in the
+cli-tools registry; it does not kill arbitrary processes by port number.
 
 ## Adding Tools
 

@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools port-stop <name>
+  port-stop <name>
+
+Stop a named port service managed by cli-tools.
+
+The command sends TERM to the service process group, waits briefly, then sends
+KILL if the service is still running.
+USAGE
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || {
+  printf 'error: failed to resolve script path\n' >&2
+  exit 1
+}
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || {
+  printf 'error: failed to resolve cli-tools root\n' >&2
+  exit 1
+}
+
+# shellcheck source=../lib/port-registry.bash
+source "$repo_dir/lib/port-registry.bash"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -ne 1 ]]; then
+  usage >&2
+  port_die "expected exactly one service name"
+fi
+
+name="$1"
+port_validate_name "$name"
+
+port_registry_lock
+
+line="$(port_registry_line_by_name "$name" || true)"
+if [[ -z "$line" ]]; then
+  port_die "unknown named port service: $name"
+fi
+
+port_parse_registry_line "$line"
+
+if ! port_service_alive "$PORT_ENTRY_PID"; then
+  port_registry_remove_name "$name"
+  printf 'Removed stale named port service: %s\n' "$name"
+  exit 0
+fi
+
+printf 'Stopping named port service: %s\n' "$name"
+printf '  port: %s\n' "$PORT_ENTRY_PORT"
+printf '  pid: %s\n' "$PORT_ENTRY_PID"
+
+kill -TERM -- "-$PORT_ENTRY_PID" 2>/dev/null || true
+
+for ((attempt = 1; attempt <= 50; attempt++)); do
+  if ! port_service_alive "$PORT_ENTRY_PID"; then
+    break
+  fi
+  sleep 0.1
+done
+
+if port_service_alive "$PORT_ENTRY_PID"; then
+  port_warn "service did not stop after TERM; sending KILL"
+  kill -KILL -- "-$PORT_ENTRY_PID" 2>/dev/null || true
+  sleep 0.2
+fi
+
+if port_service_alive "$PORT_ENTRY_PID"; then
+  port_warn "service still appears to be running; removing registry entry anyway"
+fi
+
+port_registry_remove_name "$name"
+printf 'Stopped named port service: %s\n' "$name"
