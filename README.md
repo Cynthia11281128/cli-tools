@@ -48,6 +48,7 @@ completion is missing or broken.
 | `cli-tools port-list` | List named port services started and managed by `cli-tools port-start`. | `cli-tools port-list` |
 | `cli-tools port-stop` | Stop a named port service managed by cli-tools. | `cli-tools port-stop viewer` |
 | `cli-tools port-clear-cache` | Clear named port registry and logs when no managed port services are active. | `cli-tools port-clear-cache` |
+| `cli-tools ssh-tunnel` | Open SSH local port forwards for ports you enter, print local URLs, and use `CLI_TOOLS_SSH_REMOTE` from local `.env`. | `cli-tools ssh-tunnel` |
 
 ## Named Ports
 
