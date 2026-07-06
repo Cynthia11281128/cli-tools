@@ -156,6 +156,15 @@ port_is_listening() {
   [[ -n "$first_line" ]]
 }
 
+port_color_enabled() {
+  case "${CLI_TOOLS_COLOR:-auto}" in
+    always) return 0 ;;
+    never) return 1 ;;
+    auto|"") [[ -t 1 ]] ;;
+    *) [[ -t 1 ]] ;;
+  esac
+}
+
 port_registry_line_by_name() {
   local target_name="$1"
   local name port pid start_time log_path command_text
@@ -283,19 +292,33 @@ port_registry_count_entries() {
 }
 
 port_registry_print_entries() {
-  local name port pid start_time log_path command_text status
+  local name port pid start_time log_path command_text status first_entry
+  local blue="" reset=""
+
+  if port_color_enabled; then
+    blue=$'\033[34m'
+    reset=$'\033[0m'
+  fi
 
   printf '%-20s %-6s %-10s %-8s %-25s %s\n' \
     "NAME" "PORT" "STATUS" "PID" "STARTED" "LOG"
 
+  first_entry=1
   while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
     [[ -n "$name" ]] || continue
+    if (( first_entry )); then
+      first_entry=0
+    else
+      printf '\n'
+    fi
     status="running"
     if port_is_listening "$port"; then
       status="listening"
     fi
-    printf '%-20s %-6s %-10s %-8s %-25s %s\n' \
-      "$name" "$port" "$status" "$pid" "$start_time" "$log_path"
+    printf '%b%-20s%b ' "$blue" "$name" "$reset"
+    printf '%b%-6s%b ' "$blue" "$port" "$reset"
+    printf '%-10s %-8s %-25s %s\n' \
+      "$status" "$pid" "$start_time" "$log_path"
     printf '  command: %s\n' "$command_text"
   done <"$PORT_REGISTRY"
 }

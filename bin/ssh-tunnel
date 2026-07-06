@@ -110,7 +110,7 @@ load_forward_all_ports() {
 
   [[ -x "$port_list_cmd" && -f "$port_list_cmd" ]] || die "missing port-list command: $port_list_cmd"
 
-  if ! output="$("$port_list_cmd" --remote 2>&1)"; then
+  if ! output="$(CLI_TOOLS_COLOR=never "$port_list_cmd" --remote 2>&1)"; then
     printf '%s\n' "$output" >&2
     die "failed to get remote port list"
   fi
