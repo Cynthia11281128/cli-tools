@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools glb-viewer [GLB_PATH] [--port PORT] [--name NAME] [--host HOST]
+  glb-viewer [GLB_PATH] [--port PORT] [--name NAME] [--host HOST]
+
+Start a lightweight web viewer for a single-file binary glTF (.glb) model.
+If GLB_PATH is omitted, the command prompts for the path and service name
+interactively.
+
+Options:
+  --port PORT   Port to use. Defaults to an automatically selected free port.
+  --name NAME   Named port service name. Defaults to glb-view-<port>.
+  --host HOST   Bind host for the web server. Defaults to 127.0.0.1.
+  -h, --help    Show this help.
+
+Examples:
+  cli-tools glb-viewer
+  cli-tools glb-viewer ~/outputs/scene.glb
+  cli-tools glb-viewer /data/model.glb --port 8765 --name my-glb
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+absolute_path() {
+  local path="$1"
+  local dir base abs_dir
+
+  dir="$(dirname -- "$path")"
+  base="$(basename -- "$path")"
+  abs_dir="$(CDPATH= cd -- "$dir" && pwd)" || return 1
+  printf '%s/%s\n' "$abs_dir" "$base"
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+find_free_port() {
+  local host="$1"
+
+  python3 - "$host" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind((host, 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+server_path="$repo_dir/lib/glb-viewer/server.py"
+
+host="127.0.0.1"
+port=""
+name=""
+glb_input=""
+prompted_for_glb_path="no"
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      shift
+      ;;
+    --host)
+      [[ "$#" -ge 2 ]] || die "missing value for --host"
+      host="$2"
+      shift 2
+      ;;
+    --host=*)
+      host="${1#--host=}"
+      shift
+      ;;
+    --)
+      shift
+      [[ "$#" -le 1 ]] || die "expected at most one GLB path"
+      if [[ "$#" -eq 1 ]]; then
+        glb_input="$1"
+      fi
+      shift "$#"
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      [[ -z "$glb_input" ]] || die "expected at most one GLB path"
+      glb_input="$1"
+      shift
+      ;;
+  esac
+done
+
+require_cmd python3
+
+[[ -f "$server_path" ]] || die "missing GLB viewer server: $server_path"
+
+if [[ -z "$glb_input" ]]; then
+  printf 'GLB path: ' >&2
+  IFS= read -r glb_input || die "failed to read GLB path"
+  prompted_for_glb_path="yes"
+fi
+
+[[ -n "$glb_input" ]] || die "GLB path is required"
+
+expanded_glb="$(expand_path "$glb_input")"
+[[ -f "$expanded_glb" ]] || die "GLB file does not exist: $expanded_glb"
+
+glb_path="$(absolute_path "$expanded_glb")" || die "failed to resolve GLB path: $expanded_glb"
+lower_glb_path="${glb_path,,}"
+[[ "$lower_glb_path" == *.glb ]] || die "expected a .glb file: $glb_path"
+
+if [[ -n "$port" ]]; then
+  validate_port "$port"
+else
+  port="$(find_free_port "$host")" || die "failed to find a free port for host: $host"
+fi
+
+if [[ -z "$name" && "$prompted_for_glb_path" == "yes" && -t 0 ]]; then
+  default_name="glb-view-$port"
+  printf 'Service name [%s]: ' "$default_name" >&2
+  IFS= read -r name_input || die "failed to read service name"
+  if [[ -n "$name_input" ]]; then
+    name="$name_input"
+  fi
+fi
+
+if [[ -z "$name" ]]; then
+  name="glb-view-$port"
+fi
+
+"$bin_dir/port-start" "$name" "$port" -- \
+  python3 "$server_path" --glb "$glb_path" --port "$port" --host "$host" --name "$name"
+
+url_host="$host"
+if [[ "$url_host" == "0.0.0.0" || "$url_host" == "::" ]]; then
+  url_host="127.0.0.1"
+fi
+
+printf 'Viewer URL: http://%s:%s/\n' "$url_host" "$port"
+printf 'GLB file: %s\n' "$glb_path"
+printf 'Remote access: run cli-tools ssh-tunnel --all from your local machine.\n'

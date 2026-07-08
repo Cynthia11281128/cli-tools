@@ -8,7 +8,7 @@
       :root {
         color-scheme: dark;
         --bg: #111218;
-        --panel: rgba(24, 25, 31, 0.88);
+        --panel: rgba(24, 25, 31, 0.9);
         --panel-border: rgba(255, 255, 255, 0.14);
         --text: #f4f1e8;
         --muted: #b9bdc7;
@@ -38,21 +38,26 @@
         height: 100vh;
       }
 
-      .topbar {
+      .topbar,
+      .timeline,
+      .preview {
         position: fixed;
+        z-index: 2;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+      }
+
+      .topbar {
         top: 12px;
         left: 12px;
         right: 12px;
-        z-index: 2;
         display: flex;
         align-items: center;
         gap: 10px;
         min-height: 44px;
         padding: 8px 10px;
-        border: 1px solid var(--panel-border);
-        border-radius: 8px;
-        background: var(--panel);
-        backdrop-filter: blur(12px);
       }
 
       .file {
@@ -78,30 +83,31 @@
         line-height: 16px;
       }
 
-      .controls {
+      .controls,
+      .sequence-buttons {
         flex: 0 0 auto;
         display: flex;
         align-items: center;
         gap: 10px;
       }
 
-      .point-control {
+      .point-control,
+      .toggle-control,
+      .fps-control {
         display: flex;
         align-items: center;
         gap: 7px;
-        min-width: 144px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .toggle-control {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        min-width: 102px;
         color: var(--muted);
         font-size: 12px;
         white-space: nowrap;
+      }
+
+      .point-control {
+        min-width: 144px;
+      }
+
+      .toggle-control {
+        min-width: 102px;
       }
 
       input[type="checkbox"] {
@@ -112,20 +118,32 @@
       }
 
       input[type="range"] {
-        width: 86px;
         accent-color: var(--accent);
       }
 
-      button {
+      #pointSize {
+        width: 86px;
+      }
+
+      button,
+      select {
         height: 30px;
-        min-width: 76px;
         border: 1px solid var(--panel-border);
         border-radius: 6px;
         background: rgba(255, 255, 255, 0.08);
         color: var(--text);
         font: inherit;
         font-size: 12px;
+      }
+
+      button {
+        min-width: 54px;
         cursor: pointer;
+      }
+
+      select {
+        min-width: 68px;
+        padding: 0 6px;
       }
 
       button:hover {
@@ -133,11 +151,65 @@
         background: rgba(131, 211, 197, 0.16);
       }
 
+      button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+
+      .timeline {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        display: none;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 10px;
+        min-height: 46px;
+        padding: 8px 10px;
+      }
+
+      .timeline.active {
+        display: grid;
+      }
+
+      #frameSlider {
+        width: 100%;
+      }
+
+      .frame-info {
+        min-width: 220px;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      .preview {
+        right: 12px;
+        bottom: 74px;
+        display: none;
+        width: min(380px, calc(100vw - 24px));
+        max-height: 32vh;
+        padding: 6px;
+      }
+
+      .preview.active {
+        display: block;
+      }
+
+      .preview img {
+        display: block;
+        width: 100%;
+        max-height: calc(32vh - 12px);
+        object-fit: contain;
+        border-radius: 6px;
+      }
+
       .error {
         color: var(--warn);
       }
 
-      @media (max-width: 680px) {
+      @media (max-width: 760px) {
         .topbar {
           align-items: stretch;
           flex-direction: column;
@@ -146,20 +218,31 @@
         .controls {
           justify-content: space-between;
           width: 100%;
+          flex-wrap: wrap;
         }
 
         .point-control {
-          flex: 1 1 auto;
+          flex: 1 1 160px;
           min-width: 0;
         }
 
-        .toggle-control {
-          flex: 0 0 auto;
-        }
-
-        input[type="range"] {
+        #pointSize {
           width: 100%;
           max-width: 160px;
+        }
+
+        .timeline {
+          grid-template-columns: 1fr;
+        }
+
+        .sequence-buttons {
+          justify-content: space-between;
+        }
+
+        .frame-info {
+          min-width: 0;
+          text-align: left;
+          white-space: normal;
         }
       }
     </style>
@@ -180,7 +263,7 @@
         <div id="status" class="status">Loading</div>
       </div>
       <div class="controls">
-        <label id="gridControl" class="toggle-control">
+        <label class="toggle-control">
           <input id="showGrid" type="checkbox">
           Grid
         </label>
@@ -195,6 +278,29 @@
         </label>
         <button id="resetView" type="button">Reset</button>
       </div>
+    </div>
+
+    <div id="timeline" class="timeline">
+      <div class="sequence-buttons">
+        <button id="prevFrame" type="button">Prev</button>
+        <button id="playPause" type="button">Play</button>
+        <button id="nextFrame" type="button">Next</button>
+        <label class="fps-control">
+          FPS
+          <select id="fpsSelect">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="4">4</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+      </div>
+      <input id="frameSlider" type="range" min="0" max="0" value="0" step="1">
+      <div id="frameInfo" class="frame-info"></div>
+    </div>
+
+    <div id="preview" class="preview">
+      <img id="previewImage" alt="">
     </div>
 
     <script type="module">
@@ -212,6 +318,15 @@
       const pointSize = document.getElementById("pointSize");
       const pointSizeValue = document.getElementById("pointSizeValue");
       const resetView = document.getElementById("resetView");
+      const timeline = document.getElementById("timeline");
+      const prevFrame = document.getElementById("prevFrame");
+      const playPause = document.getElementById("playPause");
+      const nextFrame = document.getElementById("nextFrame");
+      const frameSlider = document.getElementById("frameSlider");
+      const frameInfo = document.getElementById("frameInfo");
+      const fpsSelect = document.getElementById("fpsSelect");
+      const preview = document.getElementById("preview");
+      const previewImage = document.getElementById("previewImage");
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x111218);
@@ -246,11 +361,20 @@
       let displayObjects = [];
       let meshObject = null;
       let vertexObject = null;
-      let lastFrame = null;
+      let lastFrameRadius = null;
       let pointMaterial = null;
       let basePointSize = 0.01;
       let meshStatus = "";
       let verticesStatus = "";
+      let mode = "single";
+      let sequence = null;
+      let frames = [];
+      let currentFrameIndex = 0;
+      let sequenceCenter = null;
+      let sequenceFramed = false;
+      let isPlaying = false;
+      let playTimer = null;
+      let loadToken = 0;
 
       function setStatus(message, isError = false) {
         status.textContent = message;
@@ -269,6 +393,10 @@
           unit += 1;
         }
         return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function formatLoss(value) {
+        return Number.isFinite(value) ? value.toFixed(4) : "-";
       }
 
       function resize() {
@@ -295,12 +423,12 @@
 
         grid.scale.setScalar(safeRadius);
         grid.visible = showGrid.checked;
-        lastFrame = safeRadius;
+        lastFrameRadius = safeRadius;
       }
 
       function resetCamera() {
-        if (lastFrame) {
-          frameObject(lastFrame);
+        if (lastFrameRadius) {
+          frameObject(lastFrameRadius);
         }
       }
 
@@ -352,7 +480,7 @@
         setStatus(showVertices ? verticesStatus : meshStatus);
       }
 
-      function installGeometry(geometry) {
+      function installGeometry(geometry, options = {}) {
         if (!geometry.hasAttribute("position")) {
           throw new Error("PLY file has no vertex positions");
         }
@@ -363,10 +491,15 @@
         const size = new THREE.Vector3();
         box.getCenter(center);
         box.getSize(size);
-        geometry.translate(-center.x, -center.y, -center.z);
+
+        const stableCenter = options.stableCenter || center;
+        geometry.translate(-stableCenter.x, -stableCenter.y, -stableCenter.z);
         geometry.computeBoundingSphere();
 
         const radius = geometry.boundingSphere ? geometry.boundingSphere.radius : Math.max(size.x, size.y, size.z, 1);
+        if (options.onGeometryInfo) {
+          options.onGeometryInfo(center.clone(), radius);
+        }
         const hasFaces = Boolean(geometry.index && geometry.index.count > 0);
         const hasColors = geometry.hasAttribute("color");
 
@@ -422,31 +555,31 @@
           setStatus(`${geometry.attributes.position.count.toLocaleString()} points`);
         }
 
-        frameObject(radius);
-      }
-
-      async function loadMeta() {
-        const response = await fetch("/meta.json", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-        const meta = await response.json();
-        fileName.textContent = meta.name || "PLY Viewer";
-        const size = formatBytes(meta.size);
-        if (size) {
-          setStatus(`Loading ${size}`);
+        if (options.frameCamera) {
+          frameObject(radius);
+        } else {
+          lastFrameRadius = Math.max(lastFrameRadius || 0, radius);
+          grid.scale.setScalar(lastFrameRadius);
+          grid.visible = showGrid.checked;
         }
       }
 
-      async function loadPly() {
-        await loadMeta().catch(() => {});
-
+      function loadGeometry(url, options = {}) {
+        const token = ++loadToken;
         const loader = new PLYLoader();
+        const suffix = url.includes("?") ? "&" : "?";
         loader.load(
-          "/model.ply",
+          `${url}${suffix}t=${Date.now()}`,
           (geometry) => {
+            if (token !== loadToken) {
+              geometry.dispose();
+              return;
+            }
             try {
-              installGeometry(geometry);
+              installGeometry(geometry, options);
+              if (options.onLoaded) {
+                options.onLoaded();
+              }
             } catch (error) {
               console.error(error);
               setStatus(error.message || "Failed to display PLY", true);
@@ -465,16 +598,211 @@
         );
       }
 
+      async function loadMeta() {
+        const response = await fetch("/meta.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load metadata");
+        }
+        return response.json();
+      }
+
+      async function loadSingle(meta) {
+        const displayName = meta.name || meta.file_name || "PLY Viewer";
+        document.title = `${displayName} - PLY Viewer`;
+        fileName.textContent = displayName;
+        const size = formatBytes(meta.size);
+        if (size) {
+          const fileLabel = meta.file_name && meta.file_name !== displayName ? `${meta.file_name}, ` : "";
+          setStatus(`Loading ${fileLabel}${size}`);
+        }
+        loadGeometry("/model.ply", { frameCamera: true });
+      }
+
+      async function fetchSequence() {
+        const response = await fetch("/sequence.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load sequence");
+        }
+        return response.json();
+      }
+
+      function frameLabel(frame) {
+        if (frame.label) {
+          return frame.label;
+        }
+        return Number.isFinite(frame.iter) ? String(frame.iter) : "-";
+      }
+
+      function updateSequenceControls() {
+        const hasFrames = frames.length > 0;
+        frameSlider.max = Math.max(frames.length - 1, 0);
+        frameSlider.value = Math.min(currentFrameIndex, Math.max(frames.length - 1, 0));
+        prevFrame.disabled = !hasFrames || currentFrameIndex <= 0;
+        nextFrame.disabled = !hasFrames || currentFrameIndex >= frames.length - 1;
+        playPause.disabled = frames.length < 2;
+        playPause.textContent = isPlaying ? "Pause" : "Play";
+
+        if (!hasFrames) {
+          frameInfo.textContent = "No frames";
+          return;
+        }
+
+        const frame = frames[currentFrameIndex];
+        const parts = [
+          `Frame ${currentFrameIndex + 1}/${frames.length}`,
+          `Iter ${frameLabel(frame)}`
+        ];
+        if (Number.isFinite(frame.plane_count)) {
+          parts.push(`${Number(frame.plane_count).toLocaleString()} planes`);
+        }
+        if (frame.loss_total !== null && frame.loss_total !== undefined) {
+          parts.push(`Loss ${formatLoss(Number(frame.loss_total))}`);
+        }
+        frameInfo.textContent = parts.join(" | ");
+      }
+
+      function updatePreview(frame) {
+        if (frame && frame.preview_url) {
+          previewImage.src = `${frame.preview_url}?t=${Date.now()}`;
+          preview.classList.add("active");
+        } else {
+          previewImage.removeAttribute("src");
+          preview.classList.remove("active");
+        }
+      }
+
+      function setSequenceFrames(payload) {
+        sequence = payload;
+        frames = Array.isArray(payload.frames) ? payload.frames : [];
+        frames.sort((a, b) => Number(a.iter || 0) - Number(b.iter || 0));
+        currentFrameIndex = Math.min(currentFrameIndex, Math.max(frames.length - 1, 0));
+        updateSequenceControls();
+      }
+
+      function loadSequenceFrame(index, frameCamera = false) {
+        if (!frames.length) {
+          return;
+        }
+        currentFrameIndex = Math.max(0, Math.min(index, frames.length - 1));
+        const frame = frames[currentFrameIndex];
+        updateSequenceControls();
+        updatePreview(frame);
+
+        const size = formatBytes(frame.primitive_size);
+        const count = Number.isFinite(frame.plane_count) ? `${Number(frame.plane_count).toLocaleString()} planes, ` : "";
+        setStatus(`Loading iter ${frameLabel(frame)}${size ? `, ${count}${size}` : ""}`);
+
+        const options = {
+          frameCamera: frameCamera || !sequenceFramed,
+          stableCenter: sequenceCenter,
+          onGeometryInfo: (center) => {
+            if (!sequenceCenter) {
+              sequenceCenter = center;
+            }
+          },
+          onLoaded: () => {
+            sequenceFramed = true;
+            updateSequenceControls();
+          }
+        };
+
+        loadGeometry(frame.primitive_url, options);
+      }
+
+      function playNextFrame() {
+        if (!isPlaying || frames.length < 2) {
+          return;
+        }
+        const next = currentFrameIndex >= frames.length - 1 ? 0 : currentFrameIndex + 1;
+        loadSequenceFrame(next, false);
+      }
+
+      function updatePlayTimer() {
+        if (playTimer) {
+          clearInterval(playTimer);
+          playTimer = null;
+        }
+        if (isPlaying) {
+          const interval = 1000 / Math.max(Number(fpsSelect.value), 1);
+          playTimer = setInterval(playNextFrame, interval);
+        }
+      }
+
+      async function refreshSequence() {
+        if (mode !== "sequence") {
+          return;
+        }
+        try {
+          const payload = await fetchSequence();
+          const oldLength = frames.length;
+          setSequenceFrames(payload);
+          if (frames.length && oldLength === 0) {
+            loadSequenceFrame(0, true);
+          }
+          const statusBits = [];
+          if (payload.status) {
+            statusBits.push(payload.status);
+          }
+          statusBits.push(`${frames.length} frames`);
+          setStatus(statusBits.join(", "));
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message || "Failed to refresh sequence", true);
+        }
+      }
+
+      async function loadSequence(meta) {
+        mode = "sequence";
+        timeline.classList.add("active");
+        const displayName = meta.name || "PLY Sequence";
+        document.title = `${displayName} - PLY Viewer`;
+        fileName.textContent = displayName;
+        setStatus("Loading sequence");
+
+        await refreshSequence();
+        if (frames.length) {
+          loadSequenceFrame(0, true);
+        }
+        setInterval(() => {
+          if (sequence && sequence.status === "running") {
+            refreshSequence();
+          }
+        }, 2000);
+      }
+
+      async function start() {
+        try {
+          const meta = await loadMeta();
+          if (meta.mode === "sequence") {
+            await loadSequence(meta);
+          } else {
+            await loadSingle(meta);
+          }
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message || "Failed to initialize viewer", true);
+        }
+      }
+
       showGrid.addEventListener("change", updateGridVisibility);
       verticesOnly.addEventListener("change", updateDisplayMode);
       pointSize.addEventListener("input", updatePointSize);
       resetView.addEventListener("click", resetCamera);
+      prevFrame.addEventListener("click", () => loadSequenceFrame(currentFrameIndex - 1, false));
+      nextFrame.addEventListener("click", () => loadSequenceFrame(currentFrameIndex + 1, false));
+      frameSlider.addEventListener("input", () => loadSequenceFrame(Number(frameSlider.value), false));
+      fpsSelect.addEventListener("change", updatePlayTimer);
+      playPause.addEventListener("click", () => {
+        isPlaying = !isPlaying;
+        updateSequenceControls();
+        updatePlayTimer();
+      });
       window.addEventListener("resize", resize);
 
       resize();
       updatePointSize();
       updateGridVisibility();
-      loadPly();
+      start();
 
       function animate() {
         controls.update();

@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GLB Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101217;
+        --panel: rgba(23, 25, 31, 0.88);
+        --panel-border: rgba(255, 255, 255, 0.14);
+        --text: #f5f1e8;
+        --muted: #b9bec9;
+        --accent: #86d4c6;
+        --warn: #f2b84b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      #viewer {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .topbar {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 8px 10px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+      }
+
+      .file {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        line-height: 18px;
+        font-weight: 650;
+      }
+
+      .status {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .controls {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .zbar {
+        position: fixed;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 48px;
+        padding: 8px 10px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+      }
+
+      .z-title {
+        flex: 0 0 auto;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 650;
+        white-space: nowrap;
+      }
+
+      .z-control {
+        flex: 1 1 0;
+        display: grid;
+        grid-template-columns: auto minmax(120px, 1fr) 64px;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .z-value {
+        overflow: hidden;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+      .toggle-control {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 70px;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
+      input[type="range"] {
+        width: 100%;
+        min-width: 0;
+        accent-color: var(--accent);
+      }
+
+      button {
+        height: 30px;
+        min-width: 76px;
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: rgba(134, 212, 198, 0.7);
+        background: rgba(134, 212, 198, 0.16);
+      }
+
+      .error {
+        color: var(--warn);
+      }
+
+      @media (max-width: 560px) {
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .controls {
+          justify-content: space-between;
+          width: 100%;
+        }
+
+        .toggle-control {
+          flex: 0 0 auto;
+        }
+
+        .zbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .z-control {
+          grid-template-columns: 44px minmax(0, 1fr) 64px;
+        }
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="viewer"></canvas>
+    <div class="topbar">
+      <div class="file">
+        <div id="fileName" class="name">GLB Viewer</div>
+        <div id="status" class="status">Loading</div>
+      </div>
+      <div class="controls">
+        <label id="gridControl" class="toggle-control">
+          <input id="showGrid" type="checkbox">
+          Grid
+        </label>
+        <label id="textureFlipControl" class="toggle-control" style="visibility: hidden;">
+          <input id="flipTextures" type="checkbox" checked>
+          Flip V
+        </label>
+        <button id="resetView" type="button">Reset</button>
+      </div>
+    </div>
+    <div id="zClipBar" class="zbar" style="visibility: hidden;">
+      <div class="z-title">Z clip</div>
+      <label class="z-control">
+        z_min
+        <input id="zMinSlider" type="range" min="0" max="1000" value="0">
+        <span id="zMinValue" class="z-value">0.000</span>
+      </label>
+      <label class="z-control">
+        z_max
+        <input id="zMaxSlider" type="range" min="0" max="1000" value="1000">
+        <span id="zMaxValue" class="z-value">0.000</span>
+      </label>
+      <button id="resetZClip" type="button">Reset Z</button>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+      const canvas = document.getElementById("viewer");
+      const fileName = document.getElementById("fileName");
+      const status = document.getElementById("status");
+      const showGrid = document.getElementById("showGrid");
+      const textureFlipControl = document.getElementById("textureFlipControl");
+      const flipTextures = document.getElementById("flipTextures");
+      const resetView = document.getElementById("resetView");
+      const zClipBar = document.getElementById("zClipBar");
+      const zMinSlider = document.getElementById("zMinSlider");
+      const zMaxSlider = document.getElementById("zMaxSlider");
+      const zMinValue = document.getElementById("zMinValue");
+      const zMaxValue = document.getElementById("zMaxValue");
+      const resetZClip = document.getElementById("resetZClip");
+      const BASIS_TRANSCODER_PATH = "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/libs/basis/";
+      const BASIS_FORMAT_RGBA32 = 13;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x101217);
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        canvas
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      renderer.localClippingEnabled = true;
+
+      const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1000);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.screenSpacePanning = true;
+
+      scene.add(new THREE.HemisphereLight(0xf5f1e8, 0x30323b, 2.0));
+
+      const keyLight = new THREE.DirectionalLight(0xffffff, 2.1);
+      keyLight.position.set(3, 5, 4);
+      scene.add(keyLight);
+
+      const fillLight = new THREE.DirectionalLight(0x86d4c6, 0.75);
+      fillLight.position.set(-4, 2, -3);
+      scene.add(fillLight);
+
+      const grid = new THREE.GridHelper(2, 20, 0x4d5360, 0x2c3038);
+      grid.visible = false;
+      scene.add(grid);
+
+      const modelRoot = new THREE.Group();
+      scene.add(modelRoot);
+
+      let loadedScene = null;
+      let lastFrame = null;
+      let loadWarning = "";
+      let basisWorker = null;
+      let basisWorkerNextTaskId = 1;
+      const basisWorkerCallbacks = new Map();
+      const decodedTextures = new Set();
+      const zLowerPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+      const zUpperPlane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+      const zClipRange = {
+        min: -1,
+        max: 1,
+        step: 0.001
+      };
+
+      function setStatus(message, isError = false) {
+        status.textContent = message;
+        status.classList.toggle("error", isError);
+      }
+
+      function formatBytes(bytes) {
+        if (!Number.isFinite(bytes)) {
+          return "";
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = bytes;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function resize() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        renderer.setSize(width, height, false);
+        camera.aspect = width / Math.max(height, 1);
+        camera.updateProjectionMatrix();
+      }
+
+      function frameObject(radius) {
+        const safeRadius = Math.max(radius, 0.001);
+        const distance = safeRadius * 2.8;
+
+        camera.near = Math.max(safeRadius / 1000, 0.0001);
+        camera.far = Math.max(safeRadius * 1000, 100);
+        camera.position.set(distance, distance * 0.72, distance);
+        camera.updateProjectionMatrix();
+
+        controls.target.set(0, 0, 0);
+        controls.minDistance = safeRadius * 0.01;
+        controls.maxDistance = safeRadius * 80;
+        controls.update();
+
+        grid.scale.setScalar(safeRadius);
+        grid.visible = showGrid.checked;
+        lastFrame = safeRadius;
+      }
+
+      function resetCamera() {
+        if (lastFrame) {
+          frameObject(lastFrame);
+        }
+      }
+
+      function updateGridVisibility() {
+        grid.visible = showGrid.checked;
+      }
+
+      function formatZ(value) {
+        return Number(value).toFixed(3);
+      }
+
+      function sliderToZ(value) {
+        const t = Number(value) / 1000;
+        return zClipRange.min + (zClipRange.max - zClipRange.min) * t;
+      }
+
+      function zToSlider(value) {
+        const span = zClipRange.max - zClipRange.min;
+        if (span <= 0) {
+          return 0;
+        }
+        return Math.round(((value - zClipRange.min) / span) * 1000);
+      }
+
+      function updateZClip() {
+        let zMin = sliderToZ(zMinSlider.value);
+        let zMax = sliderToZ(zMaxSlider.value);
+
+        if (zMin > zMax - zClipRange.step) {
+          if (document.activeElement === zMinSlider) {
+            zMin = zMax - zClipRange.step;
+            zMinSlider.value = String(zToSlider(zMin));
+          } else {
+            zMax = zMin + zClipRange.step;
+            zMaxSlider.value = String(zToSlider(zMax));
+          }
+        }
+
+        zMin = Math.max(zClipRange.min, Math.min(zMin, zClipRange.max));
+        zMax = Math.max(zClipRange.min, Math.min(zMax, zClipRange.max));
+
+        zLowerPlane.constant = -zMin;
+        zUpperPlane.constant = zMax;
+        renderer.clippingPlanes = [zLowerPlane, zUpperPlane];
+        zMinValue.textContent = formatZ(zMin);
+        zMaxValue.textContent = formatZ(zMax);
+      }
+
+      function resetZClipRange() {
+        zMinSlider.value = "0";
+        zMaxSlider.value = "1000";
+        updateZClip();
+      }
+
+      function initializeZClip(box) {
+        const padding = Math.max((box.max.z - box.min.z) * 0.002, 0.001);
+        zClipRange.min = box.min.z - padding;
+        zClipRange.max = box.max.z + padding;
+        zClipRange.step = Math.max((zClipRange.max - zClipRange.min) / 1000, 0.001);
+        zClipBar.style.visibility = "visible";
+        resetZClipRange();
+      }
+
+      function updateTextureFlip() {
+        for (const texture of decodedTextures) {
+          texture.flipY = flipTextures.checked;
+          texture.needsUpdate = true;
+        }
+      }
+
+      function disposeMaterial(material) {
+        for (const value of Object.values(material)) {
+          if (value && value.isTexture) {
+            value.dispose();
+          }
+        }
+        material.dispose();
+      }
+
+      function disposeObject(object) {
+        object.traverse((child) => {
+          if (child.geometry) {
+            child.geometry.dispose();
+          }
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(disposeMaterial);
+            } else {
+              disposeMaterial(child.material);
+            }
+          }
+        });
+      }
+
+      function clearModel() {
+        if (!loadedScene) {
+          return;
+        }
+        modelRoot.remove(loadedScene);
+        disposeObject(loadedScene);
+        loadedScene = null;
+        decodedTextures.clear();
+        renderer.clippingPlanes = [];
+        zClipBar.style.visibility = "hidden";
+      }
+
+      function makeMaterialDoubleSided(material) {
+        material.side = THREE.DoubleSide;
+        material.needsUpdate = true;
+      }
+
+      function getBasisWorker() {
+        if (basisWorker) {
+          return basisWorker;
+        }
+
+        const source = `
+          const BASIS_TRANSCODER_PATH = ${JSON.stringify(BASIS_TRANSCODER_PATH)};
+          const BASIS_FORMAT_RGBA32 = ${BASIS_FORMAT_RGBA32};
+          let basisModulePromise = null;
+
+          async function getBasisModule() {
+            if (basisModulePromise) {
+              return basisModulePromise;
+            }
+
+            basisModulePromise = (async () => {
+              importScripts(BASIS_TRANSCODER_PATH + "basis_transcoder.js");
+              if (typeof BASIS !== "function") {
+                throw new Error("Basis transcoder did not initialize");
+              }
+
+              const response = await fetch(BASIS_TRANSCODER_PATH + "basis_transcoder.wasm");
+              if (!response.ok) {
+                throw new Error("Failed to load Basis WASM: HTTP " + response.status);
+              }
+
+              const wasmBinary = await response.arrayBuffer();
+              const basisModule = await BASIS({ wasmBinary });
+              basisModule.initializeBasis();
+              return basisModule;
+            })();
+
+            return basisModulePromise;
+          }
+
+          async function transcode(buffer) {
+            const basisModule = await getBasisModule();
+            const basisFile = new basisModule.BasisFile(new Uint8Array(buffer));
+
+            function cleanup() {
+              basisFile.close();
+              basisFile.delete();
+            }
+
+            try {
+              const width = basisFile.getImageWidth(0, 0);
+              const height = basisFile.getImageHeight(0, 0);
+              const levels = basisFile.getNumLevels(0);
+              const hasAlpha = basisFile.getHasAlpha();
+
+              if (!width || !height || !levels) {
+                throw new Error("Invalid Basis texture");
+              }
+              if (!basisFile.startTranscoding()) {
+                throw new Error("Basis texture transcoding failed to start");
+              }
+
+              const data = new Uint8Array(basisFile.getImageTranscodedSizeInBytes(0, 0, BASIS_FORMAT_RGBA32));
+              const ok = basisFile.transcodeImage(
+                data,
+                0,
+                0,
+                BASIS_FORMAT_RGBA32,
+                0,
+                hasAlpha
+              );
+              if (!ok) {
+                throw new Error("Basis texture transcoding failed");
+              }
+
+              return { width, height, data: data.buffer };
+            } finally {
+              cleanup();
+            }
+          }
+
+          self.onmessage = async (event) => {
+            const { id, buffer } = event.data;
+            try {
+              const result = await transcode(buffer);
+              self.postMessage({ id, ...result }, [result.data]);
+            } catch (error) {
+              self.postMessage({ id, error: error.message || String(error) });
+            }
+          };
+        `;
+
+        basisWorker = new Worker(URL.createObjectURL(new Blob([source], { type: "application/javascript" })));
+        basisWorker.onmessage = (event) => {
+          const { id, error, ...result } = event.data;
+          const callback = basisWorkerCallbacks.get(id);
+          if (!callback) {
+            return;
+          }
+
+          basisWorkerCallbacks.delete(id);
+          if (error) {
+            callback.reject(new Error(error));
+          } else {
+            callback.resolve(result);
+          }
+        };
+        basisWorker.onerror = (event) => {
+          for (const callback of basisWorkerCallbacks.values()) {
+            callback.reject(new Error(event.message || "Basis worker failed"));
+          }
+          basisWorkerCallbacks.clear();
+        };
+
+        return basisWorker;
+      }
+
+      function transcodeBasisBuffer(buffer) {
+        const worker = getBasisWorker();
+        const id = basisWorkerNextTaskId;
+        basisWorkerNextTaskId += 1;
+
+        return new Promise((resolve, reject) => {
+          basisWorkerCallbacks.set(id, { resolve, reject });
+          worker.postMessage({ id, buffer }, [buffer]);
+        });
+      }
+
+      async function transcodeBasisTexture(buffer, samplerDef = {}) {
+        const { width, height, data } = await transcodeBasisBuffer(buffer);
+        const pixels = new Uint8Array(data);
+        const texture = new THREE.DataTexture(pixels, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.flipY = flipTextures.checked;
+        texture.generateMipmaps = false;
+        texture.magFilter = samplerDef.magFilter === 9728 ? THREE.NearestFilter : THREE.LinearFilter;
+        texture.minFilter = samplerDef.minFilter === 9728 ? THREE.NearestFilter : THREE.LinearFilter;
+        texture.wrapS = samplerDef.wrapS === 33648 ? THREE.MirroredRepeatWrapping
+          : samplerDef.wrapS === 10497 ? THREE.RepeatWrapping
+            : THREE.ClampToEdgeWrapping;
+        texture.wrapT = samplerDef.wrapT === 33648 ? THREE.MirroredRepeatWrapping
+          : samplerDef.wrapT === 10497 ? THREE.RepeatWrapping
+            : THREE.ClampToEdgeWrapping;
+        texture.needsUpdate = true;
+        decodedTextures.add(texture);
+        return texture;
+      }
+
+      function parseGlb(arrayBuffer) {
+        const view = new DataView(arrayBuffer);
+        if (view.byteLength < 20 || view.getUint32(0, true) !== 0x46546c67) {
+          throw new Error("File is not a GLB");
+        }
+        if (view.getUint32(4, true) !== 2) {
+          throw new Error("Unsupported GLB version");
+        }
+
+        const declaredLength = view.getUint32(8, true);
+        const chunks = [];
+        let json = null;
+        let offset = 12;
+        const decoder = new TextDecoder();
+
+        while (offset + 8 <= Math.min(declaredLength, view.byteLength)) {
+          const chunkLength = view.getUint32(offset, true);
+          const chunkType = view.getUint32(offset + 4, true);
+          const dataStart = offset + 8;
+          const dataEnd = dataStart + chunkLength;
+          if (dataEnd > view.byteLength) {
+            throw new Error("GLB chunk is truncated");
+          }
+
+          const data = new Uint8Array(arrayBuffer, dataStart, chunkLength);
+          chunks.push({ type: chunkType, data: new Uint8Array(data) });
+          if (chunkType === 0x4e4f534a) {
+            json = JSON.parse(decoder.decode(data).replace(/[\u0000\s]+$/g, ""));
+          }
+          offset = dataEnd;
+        }
+
+        if (!json) {
+          throw new Error("GLB has no JSON chunk");
+        }
+        return { json, chunks };
+      }
+
+      function removeTextureReferences(value) {
+        if (!value || typeof value !== "object") {
+          return;
+        }
+
+        for (const key of Object.keys(value)) {
+          if (key.endsWith("Texture")) {
+            delete value[key];
+          } else {
+            removeTextureReferences(value[key]);
+          }
+        }
+      }
+
+      function pseudoColorForIndex(index, total) {
+        const hue = ((index * 0.61803398875) % 1 + 1) % 1;
+        const saturation = 0.44;
+        const lightness = 0.58 + ((index % 3) - 1) * 0.06;
+        const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+        const huePrime = hue * 6;
+        const second = chroma * (1 - Math.abs((huePrime % 2) - 1));
+        let red = 0;
+        let green = 0;
+        let blue = 0;
+
+        if (huePrime < 1) {
+          red = chroma;
+          green = second;
+        } else if (huePrime < 2) {
+          red = second;
+          green = chroma;
+        } else if (huePrime < 3) {
+          green = chroma;
+          blue = second;
+        } else if (huePrime < 4) {
+          green = second;
+          blue = chroma;
+        } else if (huePrime < 5) {
+          red = second;
+          blue = chroma;
+        } else {
+          red = chroma;
+          blue = second;
+        }
+
+        const match = lightness - chroma / 2;
+        const fade = Math.min(Math.max(total / 32, 0.55), 1);
+        return [
+          red * fade + match,
+          green * fade + match,
+          blue * fade + match,
+          1
+        ];
+      }
+
+      function applyPseudoMaterialColors(materials) {
+        const total = Math.max(materials.length, 1);
+        materials.forEach((material, index) => {
+          const pbr = material.pbrMetallicRoughness || {};
+          pbr.baseColorFactor = pseudoColorForIndex(index, total);
+          pbr.metallicFactor = 0;
+          pbr.roughnessFactor = 0.82;
+          material.pbrMetallicRoughness = pbr;
+        });
+      }
+
+      function getBinChunk(chunks) {
+        const binChunk = chunks.find((chunk) => chunk.type === 0x004e4942);
+        if (!binChunk) {
+          throw new Error("GLB has no BIN chunk");
+        }
+        return binChunk.data;
+      }
+
+      function getBufferViewBytes(json, chunks, bufferViewIndex) {
+        const bufferView = json.bufferViews && json.bufferViews[bufferViewIndex];
+        if (!bufferView) {
+          throw new Error(`Missing bufferView ${bufferViewIndex}`);
+        }
+        if (bufferView.buffer !== undefined && bufferView.buffer !== 0) {
+          throw new Error("External buffers are not supported by this viewer");
+        }
+
+        const bin = getBinChunk(chunks);
+        const start = bufferView.byteOffset || 0;
+        const end = start + bufferView.byteLength;
+        if (end > bin.byteLength) {
+          throw new Error(`bufferView ${bufferViewIndex} is outside the BIN chunk`);
+        }
+        return bin.slice(start, end).buffer;
+      }
+
+      function getMaterialBasisTextureRefs(json) {
+        const refs = [];
+        const materials = json.materials || [];
+        const textures = json.textures || [];
+        const images = json.images || [];
+
+        materials.forEach((material, materialIndex) => {
+          const textureInfo = material.pbrMetallicRoughness && material.pbrMetallicRoughness.baseColorTexture;
+          if (!textureInfo || textureInfo.index === undefined) {
+            return;
+          }
+
+          const texture = textures[textureInfo.index];
+          const basisExtension = texture && texture.extensions && texture.extensions.GOOGLE_texture_basis;
+          if (!basisExtension || basisExtension.source === undefined) {
+            return;
+          }
+
+          const image = images[basisExtension.source];
+          if (!image || image.mimeType !== "image/x-basis" || image.bufferView === undefined) {
+            return;
+          }
+
+          if (!material.name) {
+            material.name = `material-${materialIndex}`;
+          }
+
+          refs.push({
+            materialIndex,
+            materialName: material.name,
+            bufferView: image.bufferView,
+            sampler: texture.sampler
+          });
+        });
+
+        return refs;
+      }
+
+      async function transcodeBasisMaterialTextures(json, chunks, refs) {
+        const texturesByMaterialName = new Map();
+        const samplers = json.samplers || [];
+        const textureCache = new Map();
+
+        for (let index = 0; index < refs.length; index += 1) {
+          const ref = refs[index];
+          setStatus(`Transcoding Basis textures ${index + 1}/${refs.length}`);
+
+          if (!textureCache.has(ref.bufferView)) {
+            const buffer = getBufferViewBytes(json, chunks, ref.bufferView);
+            textureCache.set(ref.bufferView, transcodeBasisTexture(buffer, samplers[ref.sampler] || {}));
+          }
+
+          texturesByMaterialName.set(ref.materialName, await textureCache.get(ref.bufferView));
+        }
+
+        return texturesByMaterialName;
+      }
+
+      function keepKnownMaterialExtensions(json) {
+        const used = new Set(Array.isArray(json.extensionsUsed) ? json.extensionsUsed : []);
+        const required = new Set(Array.isArray(json.extensionsRequired) ? json.extensionsRequired : []);
+
+        for (const material of json.materials || []) {
+          if (material.extensions && material.extensions.KHR_materials_unlit) {
+            used.add("KHR_materials_unlit");
+          }
+        }
+
+        used.delete("GOOGLE_texture_basis");
+        required.delete("GOOGLE_texture_basis");
+
+        json.extensionsUsed = Array.from(used);
+        if (json.extensionsUsed.length === 0) {
+          delete json.extensionsUsed;
+        }
+
+        json.extensionsRequired = Array.from(required);
+        if (json.extensionsRequired.length === 0) {
+          delete json.extensionsRequired;
+        }
+      }
+
+      function stripUnsupportedBasisTextures(json, usePseudoColors) {
+        const images = json.images || [];
+        const textures = json.textures || [];
+        const hasBasisImage = images.some((image) => image.mimeType === "image/x-basis");
+        const hasGoogleBasis = textures.some((texture) => texture.extensions && texture.extensions.GOOGLE_texture_basis);
+
+        if (!hasBasisImage && !hasGoogleBasis) {
+          return false;
+        }
+
+        for (const material of json.materials || []) {
+          removeTextureReferences(material);
+        }
+        if (usePseudoColors) {
+          for (const material of json.materials || []) {
+            delete material.extensions;
+          }
+          applyPseudoMaterialColors(json.materials || []);
+        } else {
+          keepKnownMaterialExtensions(json);
+        }
+
+        delete json.images;
+        delete json.textures;
+        delete json.samplers;
+
+        keepKnownMaterialExtensions(json);
+
+        return true;
+      }
+
+      function rebuildGlb(json, chunks) {
+        const encoder = new TextEncoder();
+        const jsonBytesRaw = encoder.encode(JSON.stringify(json));
+        const jsonPadding = (4 - (jsonBytesRaw.length % 4)) % 4;
+        const jsonBytes = new Uint8Array(jsonBytesRaw.length + jsonPadding);
+        jsonBytes.set(jsonBytesRaw);
+        jsonBytes.fill(0x20, jsonBytesRaw.length);
+
+        const rebuiltChunks = chunks.map((chunk) => (
+          chunk.type === 0x4e4f534a ? { type: chunk.type, data: jsonBytes } : chunk
+        ));
+        const totalLength = 12 + rebuiltChunks.reduce((sum, chunk) => sum + 8 + chunk.data.byteLength, 0);
+        const output = new ArrayBuffer(totalLength);
+        const view = new DataView(output);
+        const bytes = new Uint8Array(output);
+
+        view.setUint32(0, 0x46546c67, true);
+        view.setUint32(4, 2, true);
+        view.setUint32(8, totalLength, true);
+
+        let offset = 12;
+        for (const chunk of rebuiltChunks) {
+          view.setUint32(offset, chunk.data.byteLength, true);
+          view.setUint32(offset + 4, chunk.type, true);
+          bytes.set(chunk.data, offset + 8);
+          offset += 8 + chunk.data.byteLength;
+        }
+
+        return output;
+      }
+
+      async function prepareGlb(arrayBuffer) {
+        const parsed = parseGlb(arrayBuffer);
+        const basisTextureRefs = getMaterialBasisTextureRefs(parsed.json);
+        if (basisTextureRefs.length === 0) {
+          loadWarning = "";
+          textureFlipControl.style.visibility = "hidden";
+          return {
+            arrayBuffer,
+            texturesByMaterialName: new Map()
+          };
+        }
+
+        try {
+          const texturesByMaterialName = await transcodeBasisMaterialTextures(parsed.json, parsed.chunks, basisTextureRefs);
+          stripUnsupportedBasisTextures(parsed.json, false);
+          loadWarning = "Basis textures transcoded";
+          textureFlipControl.style.visibility = "visible";
+          return {
+            arrayBuffer: rebuildGlb(parsed.json, parsed.chunks),
+            texturesByMaterialName
+          };
+        } catch (error) {
+          console.warn(error);
+          stripUnsupportedBasisTextures(parsed.json, true);
+          loadWarning = "Basis textures skipped; pseudo colors";
+          textureFlipControl.style.visibility = "hidden";
+          return {
+            arrayBuffer: rebuildGlb(parsed.json, parsed.chunks),
+            texturesByMaterialName: new Map()
+          };
+        }
+      }
+
+      function applyDecodedTexture(material, texturesByMaterialName) {
+        const texture = texturesByMaterialName.get(material.name);
+        if (!texture) {
+          return;
+        }
+
+        material.map = texture;
+        if (material.color) {
+          material.color.set(0xffffff);
+        }
+        material.needsUpdate = true;
+      }
+
+      function installGltf(gltf, texturesByMaterialName = new Map()) {
+        clearModel();
+
+        loadedScene = gltf.scene || new THREE.Group();
+        modelRoot.add(loadedScene);
+        loadedScene.updateMatrixWorld(true);
+
+        const box = new THREE.Box3().setFromObject(loadedScene);
+        if (box.isEmpty()) {
+          throw new Error("GLB file has no visible geometry");
+        }
+
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+        loadedScene.position.sub(center);
+        loadedScene.updateMatrixWorld(true);
+        const centeredBox = new THREE.Box3().setFromObject(loadedScene);
+
+        let meshCount = 0;
+        let triangleCount = 0;
+        loadedScene.traverse((child) => {
+          if (!child.isMesh) {
+            return;
+          }
+          meshCount += 1;
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach((material) => {
+                applyDecodedTexture(material, texturesByMaterialName);
+                makeMaterialDoubleSided(material);
+              });
+            } else {
+              applyDecodedTexture(child.material, texturesByMaterialName);
+              makeMaterialDoubleSided(child.material);
+            }
+          }
+          const geometry = child.geometry;
+          if (geometry) {
+            if (geometry.index) {
+              triangleCount += geometry.index.count / 3;
+            } else if (geometry.attributes.position) {
+              triangleCount += geometry.attributes.position.count / 3;
+            }
+          }
+        });
+
+        const radius = Math.max(size.length() / 2, 0.001);
+        frameObject(radius);
+        initializeZClip(centeredBox);
+
+        const meshLabel = `${meshCount.toLocaleString()} mesh${meshCount === 1 ? "" : "es"}`;
+        const triLabel = `${Math.round(triangleCount).toLocaleString()} triangles`;
+        const summary = `${meshLabel}, ${triLabel}`;
+        setStatus(loadWarning ? `${summary}; ${loadWarning}` : summary);
+      }
+
+      async function loadMeta() {
+        const response = await fetch("/meta.json", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const meta = await response.json();
+        const displayName = meta.name || meta.file_name || "GLB Viewer";
+        document.title = `${displayName} - GLB Viewer`;
+        fileName.textContent = displayName;
+        const size = formatBytes(meta.size);
+        if (size) {
+          const fileLabel = meta.file_name && meta.file_name !== displayName ? `${meta.file_name}, ` : "";
+          setStatus(`Loading ${fileLabel}${size}`);
+        }
+      }
+
+      async function loadGlb() {
+        await loadMeta().catch(() => {});
+
+        const loader = new GLTFLoader();
+        setStatus("Loading model");
+
+        try {
+          const response = await fetch("/model.glb", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          const prepared = await prepareGlb(await response.arrayBuffer());
+          loader.parse(
+            prepared.arrayBuffer,
+            "",
+            (gltf) => {
+              try {
+                installGltf(gltf, prepared.texturesByMaterialName);
+              } catch (error) {
+                console.error(error);
+                setStatus(error.message || "Failed to display GLB", true);
+              }
+            },
+            (error) => {
+              console.error(error);
+              setStatus(error.message ? `Failed to load GLB: ${error.message}` : "Failed to load GLB", true);
+            }
+          );
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message ? `Failed to load GLB: ${error.message}` : "Failed to load GLB", true);
+        }
+      }
+
+      showGrid.addEventListener("change", updateGridVisibility);
+      flipTextures.addEventListener("change", updateTextureFlip);
+      zMinSlider.addEventListener("input", updateZClip);
+      zMaxSlider.addEventListener("input", updateZClip);
+      resetZClip.addEventListener("click", resetZClipRange);
+      resetView.addEventListener("click", resetCamera);
+      window.addEventListener("resize", resize);
+
+      resize();
+      updateGridVisibility();
+      loadGlb();
+
+      function animate() {
+        controls.update();
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+      }
+
+      animate();
+    </script>
+  </body>
+</html>
