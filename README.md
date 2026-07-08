@@ -44,6 +44,7 @@ completion is missing or broken.
 | `cli-tools git-quick-push` | Review modified/deleted/untracked files, confirm, then commit and push. Stops on unsafe Git states. | `cd /path/to/repo && cli-tools git-quick-push` |
 | `cli-tools list` | List executable subcommands available in this toolbox. | `cli-tools list` |
 | `cli-tools notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `cli-tools notify-done -- make test` |
+| `cli-tools ply-viewer` | Prompt for or accept a `.ply` file, start a lightweight Three.js web viewer, and register it as a named port service. | `cli-tools ply-viewer /path/to/model.ply` |
 | `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
 | `cli-tools port-list` | List local named port services, or use `--remote` to list them over SSH with `CLI_TOOLS_SSH_REMOTE` from `.env`. | `cli-tools port-list --remote` |
 | `cli-tools port-stop` | Stop one named port service, or every managed service with `--all`. | `cli-tools port-stop --all` |
@@ -75,6 +76,26 @@ remote `cli-tools` command is not on PATH.
 Use `cli-tools ssh-tunnel --all` to fetch active remote named ports, connect all
 of them with one SSH tunnel, and print `name -> local URL` lines. While it is
 running, enter `s` to sync newly added remote ports or `q` to stop the tunnel.
+
+## PLY Viewer
+
+Start an ordinary mesh or point-cloud PLY viewer on the machine where the file
+lives:
+
+```bash
+cli-tools ply-viewer
+cli-tools ply-viewer /path/to/model.ply
+cli-tools ply-viewer /path/to/model.ply --port 8765 --name scene-view
+```
+
+When no path is given, `ply-viewer` prompts for one. If no port is given, it
+automatically picks a free port, starts the viewer through `port-start`, and
+prints the local URL. For remote servers, run this on the server first, then run
+the following on your local machine:
+
+```bash
+cli-tools ssh-tunnel --all
+```
 
 ## Adding Tools
 

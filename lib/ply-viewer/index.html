@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>PLY Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111218;
+        --panel: rgba(24, 25, 31, 0.88);
+        --panel-border: rgba(255, 255, 255, 0.14);
+        --text: #f4f1e8;
+        --muted: #b9bdc7;
+        --accent: #83d3c5;
+        --warn: #f2b84b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      #viewer {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .topbar {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 8px 10px;
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        background: var(--panel);
+        backdrop-filter: blur(12px);
+      }
+
+      .file {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 14px;
+        line-height: 18px;
+        font-weight: 650;
+      }
+
+      .status {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 16px;
+      }
+
+      .controls {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .point-control {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 144px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .toggle-control {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 102px;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
+      input[type="range"] {
+        width: 86px;
+        accent-color: var(--accent);
+      }
+
+      button {
+        height: 30px;
+        min-width: 76px;
+        border: 1px solid var(--panel-border);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: rgba(131, 211, 197, 0.7);
+        background: rgba(131, 211, 197, 0.16);
+      }
+
+      .error {
+        color: var(--warn);
+      }
+
+      @media (max-width: 680px) {
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .controls {
+          justify-content: space-between;
+          width: 100%;
+        }
+
+        .point-control {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+
+        .toggle-control {
+          flex: 0 0 auto;
+        }
+
+        input[type="range"] {
+          width: 100%;
+          max-width: 160px;
+        }
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="viewer"></canvas>
+    <div class="topbar">
+      <div class="file">
+        <div id="fileName" class="name">PLY Viewer</div>
+        <div id="status" class="status">Loading</div>
+      </div>
+      <div class="controls">
+        <label id="gridControl" class="toggle-control">
+          <input id="showGrid" type="checkbox">
+          Grid
+        </label>
+        <label id="verticesOnlyControl" class="toggle-control" style="visibility: hidden;">
+          <input id="verticesOnly" type="checkbox">
+          Vertices only
+        </label>
+        <label id="pointControl" class="point-control" style="visibility: hidden;">
+          Point size
+          <input id="pointSize" type="range" min="1" max="40" value="8">
+          <span id="pointSizeValue">8</span>
+        </label>
+        <button id="resetView" type="button">Reset</button>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
+
+      const canvas = document.getElementById("viewer");
+      const fileName = document.getElementById("fileName");
+      const status = document.getElementById("status");
+      const showGrid = document.getElementById("showGrid");
+      const verticesOnlyControl = document.getElementById("verticesOnlyControl");
+      const verticesOnly = document.getElementById("verticesOnly");
+      const pointControl = document.getElementById("pointControl");
+      const pointSize = document.getElementById("pointSize");
+      const pointSizeValue = document.getElementById("pointSizeValue");
+      const resetView = document.getElementById("resetView");
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x111218);
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        canvas
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1000);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.screenSpacePanning = true;
+
+      scene.add(new THREE.HemisphereLight(0xf4f1e8, 0x30323b, 2.2));
+
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      keyLight.position.set(3, 5, 4);
+      scene.add(keyLight);
+
+      const fillLight = new THREE.DirectionalLight(0x83d3c5, 0.7);
+      fillLight.position.set(-4, 2, -3);
+      scene.add(fillLight);
+
+      const grid = new THREE.GridHelper(2, 20, 0x4d5360, 0x2c3038);
+      grid.visible = false;
+      scene.add(grid);
+
+      let displayObjects = [];
+      let meshObject = null;
+      let vertexObject = null;
+      let lastFrame = null;
+      let pointMaterial = null;
+      let basePointSize = 0.01;
+      let meshStatus = "";
+      let verticesStatus = "";
+
+      function setStatus(message, isError = false) {
+        status.textContent = message;
+        status.classList.toggle("error", isError);
+      }
+
+      function formatBytes(bytes) {
+        if (!Number.isFinite(bytes)) {
+          return "";
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = bytes;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function resize() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        renderer.setSize(width, height, false);
+        camera.aspect = width / Math.max(height, 1);
+        camera.updateProjectionMatrix();
+      }
+
+      function frameObject(radius) {
+        const safeRadius = Math.max(radius, 0.001);
+        const distance = safeRadius * 2.6;
+
+        camera.near = Math.max(safeRadius / 1000, 0.0001);
+        camera.far = Math.max(safeRadius * 1000, 100);
+        camera.position.set(distance, distance * 0.72, distance);
+        camera.updateProjectionMatrix();
+
+        controls.target.set(0, 0, 0);
+        controls.minDistance = safeRadius * 0.01;
+        controls.maxDistance = safeRadius * 80;
+        controls.update();
+
+        grid.scale.setScalar(safeRadius);
+        grid.visible = showGrid.checked;
+        lastFrame = safeRadius;
+      }
+
+      function resetCamera() {
+        if (lastFrame) {
+          frameObject(lastFrame);
+        }
+      }
+
+      function updatePointSize() {
+        pointSizeValue.textContent = pointSize.value;
+        if (pointMaterial) {
+          pointMaterial.size = basePointSize * Number(pointSize.value);
+        }
+      }
+
+      function updateGridVisibility() {
+        grid.visible = showGrid.checked;
+      }
+
+      function disposeDisplayObjects() {
+        const disposedGeometries = new Set();
+        const disposedMaterials = new Set();
+
+        for (const object of displayObjects) {
+          scene.remove(object);
+          if (object.geometry && !disposedGeometries.has(object.geometry)) {
+            object.geometry.dispose();
+            disposedGeometries.add(object.geometry);
+          }
+          if (object.material && !disposedMaterials.has(object.material)) {
+            object.material.dispose();
+            disposedMaterials.add(object.material);
+          }
+        }
+
+        displayObjects = [];
+        meshObject = null;
+        vertexObject = null;
+        pointMaterial = null;
+      }
+
+      function updateDisplayMode() {
+        if (!meshObject || !vertexObject) {
+          verticesOnlyControl.style.visibility = "hidden";
+          pointControl.style.visibility = pointMaterial ? "visible" : "hidden";
+          return;
+        }
+
+        const showVertices = verticesOnly.checked;
+        meshObject.visible = !showVertices;
+        vertexObject.visible = showVertices;
+        pointControl.style.visibility = showVertices ? "visible" : "hidden";
+        verticesOnlyControl.style.visibility = "visible";
+        setStatus(showVertices ? verticesStatus : meshStatus);
+      }
+
+      function installGeometry(geometry) {
+        if (!geometry.hasAttribute("position")) {
+          throw new Error("PLY file has no vertex positions");
+        }
+
+        geometry.computeBoundingBox();
+        const box = geometry.boundingBox;
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        box.getCenter(center);
+        box.getSize(size);
+        geometry.translate(-center.x, -center.y, -center.z);
+        geometry.computeBoundingSphere();
+
+        const radius = geometry.boundingSphere ? geometry.boundingSphere.radius : Math.max(size.x, size.y, size.z, 1);
+        const hasFaces = Boolean(geometry.index && geometry.index.count > 0);
+        const hasColors = geometry.hasAttribute("color");
+
+        disposeDisplayObjects();
+
+        if (hasFaces) {
+          geometry.computeVertexNormals();
+          const meshMaterial = new THREE.MeshStandardMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            metalness: 0.0,
+            roughness: 0.82,
+            side: THREE.DoubleSide,
+            vertexColors: hasColors
+          });
+
+          const vertexGeometry = geometry.clone();
+          vertexGeometry.setIndex(null);
+          basePointSize = Math.max(radius / 850, 0.0005);
+          pointMaterial = new THREE.PointsMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            size: basePointSize * Number(pointSize.value),
+            sizeAttenuation: true,
+            vertexColors: hasColors
+          });
+
+          meshObject = new THREE.Mesh(geometry, meshMaterial);
+          vertexObject = new THREE.Points(vertexGeometry, pointMaterial);
+          vertexObject.visible = false;
+          displayObjects = [meshObject, vertexObject];
+          scene.add(meshObject);
+          scene.add(vertexObject);
+
+          meshStatus = `${geometry.attributes.position.count.toLocaleString()} vertices, mesh`;
+          verticesStatus = `${geometry.attributes.position.count.toLocaleString()} vertices only`;
+          verticesOnly.checked = false;
+          updateDisplayMode();
+        } else {
+          basePointSize = Math.max(radius / 850, 0.0005);
+          pointMaterial = new THREE.PointsMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            size: basePointSize * Number(pointSize.value),
+            sizeAttenuation: true,
+            vertexColors: hasColors
+          });
+          const pointObject = new THREE.Points(geometry, pointMaterial);
+          displayObjects = [pointObject];
+          scene.add(pointObject);
+          meshStatus = "";
+          verticesStatus = "";
+          verticesOnly.checked = false;
+          verticesOnlyControl.style.visibility = "hidden";
+          pointControl.style.visibility = "visible";
+          setStatus(`${geometry.attributes.position.count.toLocaleString()} points`);
+        }
+
+        frameObject(radius);
+      }
+
+      async function loadMeta() {
+        const response = await fetch("/meta.json", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const meta = await response.json();
+        fileName.textContent = meta.name || "PLY Viewer";
+        const size = formatBytes(meta.size);
+        if (size) {
+          setStatus(`Loading ${size}`);
+        }
+      }
+
+      async function loadPly() {
+        await loadMeta().catch(() => {});
+
+        const loader = new PLYLoader();
+        loader.load(
+          "/model.ply",
+          (geometry) => {
+            try {
+              installGeometry(geometry);
+            } catch (error) {
+              console.error(error);
+              setStatus(error.message || "Failed to display PLY", true);
+            }
+          },
+          (event) => {
+            if (event.lengthComputable && event.total > 0) {
+              const percent = Math.round((event.loaded / event.total) * 100);
+              setStatus(`Loading ${percent}%`);
+            }
+          },
+          (error) => {
+            console.error(error);
+            setStatus("Failed to load PLY", true);
+          }
+        );
+      }
+
+      showGrid.addEventListener("change", updateGridVisibility);
+      verticesOnly.addEventListener("change", updateDisplayMode);
+      pointSize.addEventListener("input", updatePointSize);
+      resetView.addEventListener("click", resetCamera);
+      window.addEventListener("resize", resize);
+
+      resize();
+      updatePointSize();
+      updateGridVisibility();
+      loadPly();
+
+      function animate() {
+        controls.update();
+        renderer.render(scene, camera);
+        requestAnimationFrame(animate);
+      }
+
+      animate();
+    </script>
+  </body>
+</html>
