@@ -10,8 +10,11 @@ Usage:
 
 Create SSH local port forwards using CLI_TOOLS_SSH_REMOTE from .env.
 After you enter ports, the command prints local URLs you can open.
-With --all, fetch active named ports with port-list --remote and
-forward all of them.
+
+With --all, fetch active named remote ports, forward all of them, then keep an
+interactive prompt open:
+  s + Enter  sync new remote ports
+  q + Enter  stop tunnel and quit
 
 Example input:
   8087 8088
@@ -61,29 +64,38 @@ strip_matching_quotes() {
   printf '%s\n' "$value"
 }
 
-load_remote() {
+load_env_value() {
   local env_file="$1"
-  local line remote=""
+  local key="$2"
+  local line value=""
 
   [[ -f "$env_file" ]] || die "missing .env file: $env_file"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
       ""|\#*) continue ;;
-      CLI_TOOLS_SSH_REMOTE=*)
-        remote="${line#CLI_TOOLS_SSH_REMOTE=}"
+      "$key"=*)
+        value="${line#"$key"=}"
         ;;
     esac
   done <"$env_file"
 
-  remote="$(strip_matching_quotes "$remote")"
+  strip_matching_quotes "$value"
+}
 
+load_remote_config() {
+  local env_file="$repo_root/.env"
+
+  remote="$(load_env_value "$env_file" "CLI_TOOLS_SSH_REMOTE")"
   [[ -n "$remote" ]] || die "missing CLI_TOOLS_SSH_REMOTE in $env_file"
   case "$remote" in
     *[[:space:]]*) die "CLI_TOOLS_SSH_REMOTE must not contain whitespace" ;;
   esac
 
-  printf '%s\n' "$remote"
+  remote_cli="$(load_env_value "$env_file" "CLI_TOOLS_REMOTE_CLI")"
+  case "$remote_cli" in
+    *[[:space:]]*) die "CLI_TOOLS_REMOTE_CLI must not contain whitespace" ;;
+  esac
 }
 
 is_port_number() {
@@ -104,16 +116,50 @@ add_port() {
   port_names+=("$name")
 }
 
-load_forward_all_ports() {
-  local port_list_cmd="$repo_root/bin/port-list"
+remote_port_list_command() {
+  cat <<'REMOTE_COMMAND'
+if command -v cli-tools >/dev/null 2>&1; then
+  exec cli-tools port-list
+elif [ -x "$HOME/cli-tools/bin/cli-tools" ]; then
+  exec "$HOME/cli-tools/bin/cli-tools" port-list
+elif [ -x "$HOME/.local/bin/cli-tools" ]; then
+  exec "$HOME/.local/bin/cli-tools" port-list
+elif [ -x "$HOME/miniconda3/bin/cli-tools" ]; then
+  exec "$HOME/miniconda3/bin/cli-tools" port-list
+fi
+
+printf "%s\n" "error: remote cli-tools not found; set CLI_TOOLS_REMOTE_CLI in local .env to the remote cli-tools path" >&2
+exit 127
+REMOTE_COMMAND
+}
+
+fetch_remote_port_list() {
+  local remote_command output
+
+  if [[ -n "$remote_cli" ]]; then
+    if ! output="$(ssh -S "$control_socket" "$remote" "$remote_cli" port-list 2>&1)"; then
+      printf '%s\n' "$output" >&2
+      die "failed to get remote port list"
+    fi
+  else
+    remote_command="$(remote_port_list_command)"
+    if ! output="$(ssh -S "$control_socket" "$remote" "$remote_command" 2>&1)"; then
+      printf '%s\n' "$output" >&2
+      die "failed to get remote port list"
+    fi
+  fi
+
+  printf '%s\n' "$output"
+}
+
+load_all_remote_ports() {
   local output line name port status rest
 
-  [[ -x "$port_list_cmd" && -f "$port_list_cmd" ]] || die "missing port-list command: $port_list_cmd"
+  ports=()
+  port_names=()
+  seen_ports=()
 
-  if ! output="$(CLI_TOOLS_COLOR=never "$port_list_cmd" --remote 2>&1)"; then
-    printf '%s\n' "$output" >&2
-    die "failed to get remote port list"
-  fi
+  output="$(fetch_remote_port_list)"
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -n "$line" ]] || continue
@@ -128,8 +174,190 @@ load_forward_all_ports() {
 
     add_port "$port" "$name"
   done <<<"$output"
+}
 
-  [[ "${#ports[@]}" -gt 0 ]] || die "no active remote named port services found"
+safe_remote_name() {
+  printf '%s' "$remote" | tr -c 'A-Za-z0-9._@-' '_'
+}
+
+start_master() {
+  local socket_dir safe_remote
+
+  socket_dir="$repo_root/.cache/ssh-tunnel"
+  mkdir -p "$socket_dir"
+  safe_remote="$(safe_remote_name)"
+  control_socket="$socket_dir/${safe_remote}-$$.sock"
+
+  printf 'Starting SSH master to %s...\n' "$remote"
+  if ! ssh -M -S "$control_socket" -N -f "$remote"; then
+    die "failed to start SSH master tunnel"
+  fi
+  master_started=1
+}
+
+stop_master() {
+  if [[ "${master_started:-0}" -eq 1 ]]; then
+    ssh -S "$control_socket" -O exit "$remote" >/dev/null 2>&1 || true
+    master_started=0
+  fi
+
+  if [[ -n "${control_socket:-}" ]]; then
+    rm -f -- "$control_socket"
+  fi
+}
+
+handle_signal() {
+  printf '\nStopping SSH tunnel...\n' >&2
+  stop_master
+  exit 130
+}
+
+forward_port() {
+  local port="$1"
+
+  if ! ssh -S "$control_socket" -O forward -o ExitOnForwardFailure=yes \
+    -L "$port:127.0.0.1:$port" "$remote"; then
+    die "failed to forward port: $port"
+  fi
+}
+
+sync_all_ports() {
+  local heading="$1"
+  local require_any="${2:-0}"
+  local index port name
+  local new_ports=()
+  local new_names=()
+
+  load_all_remote_ports
+
+  if [[ "${#ports[@]}" -eq 0 && "$require_any" -eq 1 ]]; then
+    die "no active remote named port services found"
+  fi
+
+  for index in "${!ports[@]}"; do
+    port="${ports[$index]}"
+    name="${port_names[$index]}"
+
+    if [[ -n "${forwarded_ports[$port]:-}" ]]; then
+      continue
+    fi
+
+    forward_port "$port"
+    forwarded_ports[$port]=1
+    forwarded_names[$port]="$name"
+    new_ports+=("$port")
+    new_names+=("$name")
+  done
+
+  if [[ "${#new_ports[@]}" -eq 0 ]]; then
+    printf 'No new remote named ports.\n'
+    return 0
+  fi
+
+  printf '%s:\n' "$heading"
+  for index in "${!new_ports[@]}"; do
+    port="${new_ports[$index]}"
+    name="${new_names[$index]}"
+    if [[ -n "$name" ]]; then
+      printf '  %s -> http://127.0.0.1:%s/\n' "$name" "$port"
+    else
+      printf '  http://127.0.0.1:%s/\n' "$port"
+    fi
+  done
+}
+
+print_loop_help() {
+  cat <<'HELP'
+
+Commands:
+  s + Enter  sync new remote ports
+  q + Enter  stop tunnel and quit
+HELP
+}
+
+run_all_mode() {
+  local action
+
+  master_started=0
+  control_socket=""
+  declare -gA forwarded_ports=()
+  declare -gA forwarded_names=()
+
+  trap stop_master EXIT
+  trap handle_signal INT TERM
+
+  start_master
+  sync_all_ports "Open" 1
+  print_loop_help
+
+  while true; do
+    printf '\nssh-tunnel> '
+    if ! IFS= read -r action; then
+      printf '\n'
+      break
+    fi
+
+    case "$action" in
+      "" )
+        ;;
+      s|sync )
+        sync_all_ports "Added" 0
+        ;;
+      q|quit|exit )
+        break
+        ;;
+      h|help|\? )
+        print_loop_help
+        ;;
+      * )
+        printf 'Unknown command: %s\n' "$action" >&2
+        print_loop_help
+        ;;
+    esac
+  done
+
+  printf 'Stopping SSH tunnel...\n'
+  stop_master
+  trap - EXIT INT TERM
+}
+
+run_manual_mode() {
+  local ports_line port index name
+  local ssh_args=(-N)
+
+  ports=()
+  port_names=()
+  declare -gA seen_ports=()
+
+  printf 'Ports to forward, separated by spaces: '
+  if ! IFS= read -r ports_line; then
+    die "failed to read ports"
+  fi
+
+  for port in $ports_line; do
+    add_port "$port" ""
+  done
+
+  [[ "${#ports[@]}" -gt 0 ]] || die "at least one port is required"
+
+  for port in "${ports[@]}"; do
+    ssh_args+=(-L "$port:127.0.0.1:$port")
+  done
+  ssh_args+=("$remote")
+
+  printf 'Open:\n'
+  for index in "${!ports[@]}"; do
+    port="${ports[$index]}"
+    name="${port_names[$index]}"
+    if [[ -n "$name" ]]; then
+      printf '  %s -> http://127.0.0.1:%s/\n' "$name" "$port"
+    else
+      printf '  http://127.0.0.1:%s/\n' "$port"
+    fi
+  done
+
+  printf 'Starting SSH tunnel to %s. Press Ctrl-C to stop.\n' "$remote"
+  exec ssh "${ssh_args[@]}"
 }
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
@@ -152,43 +380,16 @@ require_cmd ssh
 
 script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
 repo_root="$(CDPATH= cd -- "$(dirname -- "$script_path")/.." && pwd)"
-remote="$(load_remote "$repo_root/.env")"
+remote=""
+remote_cli=""
+load_remote_config
 
 ports=()
 port_names=()
 declare -A seen_ports=()
 
 if [[ "$forward_all" -eq 1 ]]; then
-  load_forward_all_ports
+  run_all_mode
 else
-  printf 'Ports to forward, separated by spaces: '
-  if ! IFS= read -r ports_line; then
-    die "failed to read ports"
-  fi
-
-  for port in $ports_line; do
-    add_port "$port" ""
-  done
+  run_manual_mode
 fi
-
-[[ "${#ports[@]}" -gt 0 ]] || die "at least one port is required"
-
-ssh_args=(-N)
-for port in "${ports[@]}"; do
-  ssh_args+=(-L "$port:127.0.0.1:$port")
-done
-ssh_args+=("$remote")
-
-printf 'Open:\n'
-for index in "${!ports[@]}"; do
-  port="${ports[$index]}"
-  name="${port_names[$index]}"
-  if [[ -n "$name" ]]; then
-    printf '  %s -> http://127.0.0.1:%s/\n' "$name" "$port"
-  else
-    printf '  http://127.0.0.1:%s/\n' "$port"
-  fi
-done
-
-printf 'Starting SSH tunnel to %s. Press Ctrl-C to stop.\n' "$remote"
-exec ssh "${ssh_args[@]}"

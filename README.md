@@ -72,8 +72,9 @@ registry; it does not kill arbitrary processes by port number.
 `CLI_TOOLS_SSH_REMOTE` in local `.env`; set `CLI_TOOLS_REMOTE_CLI` there if the
 remote `cli-tools` command is not on PATH.
 
-Use `cli-tools ssh-tunnel --all` to fetch active remote named ports,
-connect all of them with one SSH tunnel, and print `name -> local URL` lines.
+Use `cli-tools ssh-tunnel --all` to fetch active remote named ports, connect all
+of them with one SSH tunnel, and print `name -> local URL` lines. While it is
+running, enter `s` to sync newly added remote ports or `q` to stop the tunnel.
 
 ## Adding Tools
 
