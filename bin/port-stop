@@ -4,15 +4,18 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  cli-tools port-stop <name>
+  cli-tools port-stop <name-or-port> [...]
   cli-tools port-stop --all
-  port-stop <name>
+  port-stop <name-or-port> [...]
   port-stop --all
 
-Stop a named port service managed by cli-tools.
+Stop one or more named port services managed by cli-tools.
 
 The command sends TERM to the service process group, waits briefly, then sends
 KILL if the service is still running.
+
+Targets may be service names or managed port numbers. Numeric targets are
+resolved as ports first, then service names.
 
 With --all, stop every active named port service managed by cli-tools.
 USAGE
@@ -93,6 +96,47 @@ stop_registry_line() {
   printf 'Stopped named port service: %s\n' "$PORT_ENTRY_NAME"
 }
 
+port_number_for_target() {
+  local target="$1"
+  local port_number
+
+  [[ "$target" =~ ^[0-9]+$ ]] || return 1
+  port_number=$((10#$target))
+  (( port_number >= 1 && port_number <= 65535 )) || return 1
+  printf '%s\n' "$port_number"
+}
+
+registry_line_for_target() {
+  local target="$1"
+  local target_port=""
+  local line=""
+
+  if target_port="$(port_number_for_target "$target")"; then
+    line="$(port_registry_line_by_port "$target_port" || true)"
+    if [[ -n "$line" ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  fi
+
+  port_validate_name "$target"
+
+  line="$(port_registry_line_by_name "$target" || true)"
+  if [[ -n "$line" ]]; then
+    printf '%s\n' "$line"
+    return 0
+  fi
+
+  if [[ "$target" =~ ^[0-9]+$ ]]; then
+    if [[ -n "$target_port" ]]; then
+      port_die "unknown named port service or managed port: $target"
+    fi
+    port_die "unknown named port service, and not a valid port: $target"
+  fi
+
+  port_die "unknown named port service: $target"
+}
+
 if [[ "$#" -eq 1 && "${1:-}" == "--all" ]]; then
   port_registry_lock
   port_registry_cleanup_stale
@@ -114,19 +158,40 @@ if [[ "$#" -eq 1 && "${1:-}" == "--all" ]]; then
   exit 0
 fi
 
-if [[ "$#" -ne 1 ]]; then
-  usage >&2
-  port_die "expected exactly one service name or --all"
-fi
+for target in "$@"; do
+  if [[ "$target" == "--all" ]]; then
+    usage >&2
+    port_die "--all cannot be combined with service names or ports"
+  fi
+done
 
-name="$1"
-port_validate_name "$name"
+if [[ "$#" -eq 0 ]]; then
+  usage >&2
+  port_die "expected at least one service name/port or --all"
+fi
 
 port_registry_lock
+port_registry_cleanup_stale
 
-line="$(port_registry_line_by_name "$name" || true)"
-if [[ -z "$line" ]]; then
-  port_die "unknown named port service: $name"
+declare -A seen_names=()
+lines=()
+
+for target in "$@"; do
+  line="$(registry_line_for_target "$target")"
+  port_parse_registry_line "$line"
+
+  if [[ -n "${seen_names[$PORT_ENTRY_NAME]+x}" ]]; then
+    continue
+  fi
+
+  seen_names["$PORT_ENTRY_NAME"]=1
+  lines+=("$line")
+done
+
+if (( ${#lines[@]} > 1 )); then
+  printf 'Stopping %d named port service(s).\n' "${#lines[@]}"
 fi
 
-stop_registry_line "$line"
+for line in "${lines[@]}"; do
+  stop_registry_line "$line"
+done

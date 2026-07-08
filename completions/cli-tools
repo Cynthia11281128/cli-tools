@@ -40,8 +40,24 @@ _cli_tools_candidates() {
   done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
 }
 
+_cli_tools_port_stop_targets() {
+  local completion_path repo_dir registry
+  local name port pid start_time log_path command_text
+
+  completion_path="$(_cli_tools_resolve_path "${BASH_SOURCE[0]}")" || return 0
+  repo_dir="$(CDPATH= cd -- "$(dirname -- "$completion_path")/.." 2>/dev/null && pwd)" || return 0
+  registry="$repo_dir/.cache/ports/registry.tsv"
+
+  [[ -f "$registry" ]] || return 0
+
+  while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
+    [[ -n "$name" ]] || continue
+    printf '%s\n%s\n' "$name" "$port"
+  done <"$registry"
+}
+
 _cli_tools_completion() {
-  local cur candidates
+  local cur command_name candidates
   cur="${COMP_WORDS[COMP_CWORD]:-}"
 
   if [[ "${COMP_CWORD:-0}" -eq 1 ]]; then
@@ -49,6 +65,16 @@ _cli_tools_completion() {
       candidates="$(_cli_tools_candidates yes | sort -u)"
     else
       candidates="$(_cli_tools_candidates no | sort -u)"
+    fi
+    mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")
+    return 0
+  fi
+
+  command_name="${COMP_WORDS[1]:-}"
+  if [[ "$command_name" == "port-stop" && "${COMP_CWORD:-0}" -ge 2 ]]; then
+    candidates="$(_cli_tools_port_stop_targets)"
+    if [[ "${COMP_CWORD:-0}" -eq 2 ]]; then
+      candidates="${candidates}"$'\n--all'
     fi
     mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")
     return 0

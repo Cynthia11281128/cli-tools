@@ -100,10 +100,12 @@ port_validate_name() {
 
 port_validate_port() {
   local port="$1"
+  local port_number
 
   [[ "$port" =~ ^[0-9]+$ ]] ||
     port_die "invalid port: $port; expected an integer from 1 to 65535"
-  (( port >= 1 && port <= 65535 )) ||
+  port_number=$((10#$port))
+  (( port_number >= 1 && port_number <= 65535 )) ||
     port_die "invalid port: $port; expected an integer from 1 to 65535"
 }
 
@@ -174,6 +176,28 @@ port_registry_line_by_name() {
   while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
     [[ -n "$name" ]] || continue
     if [[ "$name" == "$target_name" ]]; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$name" "$port" "$pid" "$start_time" "$log_path" "$command_text"
+      return 0
+    fi
+  done <"$PORT_REGISTRY"
+
+  return 1
+}
+
+port_registry_line_by_port() {
+  local target_port="$1"
+  local target_port_number
+  local name port pid start_time log_path command_text
+
+  target_port_number=$((10#$target_port))
+
+  [[ -f "$PORT_REGISTRY" ]] || return 1
+
+  while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
+    [[ -n "$name" ]] || continue
+    if [[ "$port" == "$target_port" ]] ||
+      { [[ "$port" =~ ^[0-9]+$ ]] && (( 10#$port == target_port_number )); }; then
       printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$name" "$port" "$pid" "$start_time" "$log_path" "$command_text"
       return 0

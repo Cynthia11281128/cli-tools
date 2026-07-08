@@ -47,7 +47,7 @@ completion is missing or broken.
 | `cli-tools ply-viewer` | Prompt for or accept a `.ply` file, start a lightweight Three.js web viewer, and register it as a named port service. | `cli-tools ply-viewer /path/to/model.ply` |
 | `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
 | `cli-tools port-list` | List local named port services, or use `--remote` to list them over SSH with `CLI_TOOLS_SSH_REMOTE` from `.env`. | `cli-tools port-list --remote` |
-| `cli-tools port-stop` | Stop one named port service, or every managed service with `--all`. | `cli-tools port-stop --all` |
+| `cli-tools port-stop` | Stop one or more managed services by name or port, or every managed service with `--all`. | `cli-tools port-stop viewer 7860` |
 | `cli-tools port-clear-cache` | Clear named port registry and logs when no managed port services are active. | `cli-tools port-clear-cache` |
 | `cli-tools ssh-tunnel` | Open SSH local port forwards for entered ports, or use `--all` to forward every active named remote port. | `cli-tools ssh-tunnel --all` |
 
@@ -61,14 +61,17 @@ cli-tools port-start viewer 7860 -- python visualize_web/server.py --port 7860
 cli-tools port-list
 cli-tools port-list --remote
 cli-tools port-stop viewer
+cli-tools port-stop 7860
+cli-tools port-stop viewer 6006
 cli-tools port-stop --all
 cli-tools port-clear-cache
 ```
 
 `port-start` requires `--` before the command it should run. Names may contain
 only letters, numbers, `.`, `_`, and `-`. `port-stop --all` stops every active
-service in the cli-tools registry. `port-stop` only stops services in the
-registry; it does not kill arbitrary processes by port number.
+service in the cli-tools registry. `port-stop` accepts one or more service names
+or managed port numbers. It only stops services in the registry; it does not
+kill arbitrary unregistered processes by port number.
 `port-list --remote` runs `cli-tools port-list` on the SSH target configured as
 `CLI_TOOLS_SSH_REMOTE` in local `.env`; set `CLI_TOOLS_REMOTE_CLI` there if the
 remote `cli-tools` command is not on PATH.
