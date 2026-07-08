@@ -8,7 +8,8 @@ Usage:
   ply-viewer [PLY_PATH] [--port PORT] [--name NAME] [--host HOST]
 
 Start a lightweight web viewer for an ordinary mesh or point-cloud PLY file.
-If PLY_PATH is omitted, the command prompts for it interactively.
+If PLY_PATH is omitted, the command prompts for the path and service name
+interactively.
 
 Options:
   --port PORT   Port to use. Defaults to an automatically selected free port.
@@ -99,6 +100,7 @@ host="127.0.0.1"
 port=""
 name=""
 ply_input=""
+prompted_for_ply_path="no"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -160,6 +162,7 @@ require_cmd realpath
 if [[ -z "$ply_input" ]]; then
   printf 'PLY path: ' >&2
   IFS= read -r ply_input || die "failed to read PLY path"
+  prompted_for_ply_path="yes"
 fi
 
 [[ -n "$ply_input" ]] || die "PLY path is required"
@@ -175,6 +178,15 @@ if [[ -n "$port" ]]; then
   validate_port "$port"
 else
   port="$(find_free_port "$host")" || die "failed to find a free port for host: $host"
+fi
+
+if [[ -z "$name" && "$prompted_for_ply_path" == "yes" && -t 0 ]]; then
+  default_name="ply-view-$port"
+  printf 'Service name [%s]: ' "$default_name" >&2
+  IFS= read -r name_input || die "failed to read service name"
+  if [[ -n "$name_input" ]]; then
+    name="$name_input"
+  fi
 fi
 
 if [[ -z "$name" ]]; then

@@ -92,10 +92,11 @@ cli-tools ply-viewer /path/to/model.ply
 cli-tools ply-viewer /path/to/model.ply --port 8765 --name scene-view
 ```
 
-When no path is given, `ply-viewer` prompts for one. If no port is given, it
-automatically picks a free port, starts the viewer through `port-start`, and
-prints the local URL. For remote servers, run this on the server first, then run
-the following on your local machine:
+When no path is given, `ply-viewer` prompts for the PLY path and a named port
+service name. Press Enter at the name prompt to use `ply-view-<port>`. If no
+port is given, it automatically picks a free port, starts the viewer through
+`port-start`, and prints the local URL. For remote servers, run this on the
+server first, then run the following on your local machine:
 
 ```bash
 cli-tools ssh-tunnel --all
