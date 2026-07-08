@@ -221,12 +221,25 @@ forward_port() {
   fi
 }
 
+print_forwarded_urls() {
+  local port name
+
+  printf 'Open:\n'
+  for port in "${forwarded_order[@]}"; do
+    name="${forwarded_names[$port]:-}"
+    if [[ -n "$name" ]]; then
+      printf '  %s -> http://127.0.0.1:%s/\n' "$name" "$port"
+    else
+      printf '  http://127.0.0.1:%s/\n' "$port"
+    fi
+  done
+}
+
 sync_all_ports() {
   local heading="$1"
   local require_any="${2:-0}"
   local index port name
-  local new_ports=()
-  local new_names=()
+  local added=0
 
   load_all_remote_ports
 
@@ -245,25 +258,17 @@ sync_all_ports() {
     forward_port "$port"
     forwarded_ports[$port]=1
     forwarded_names[$port]="$name"
-    new_ports+=("$port")
-    new_names+=("$name")
+    forwarded_order+=("$port")
+    added=$((added + 1))
   done
 
-  if [[ "${#new_ports[@]}" -eq 0 ]]; then
+  if [[ "$added" -eq 0 ]]; then
     printf 'No new remote named ports.\n'
-    return 0
+  elif [[ "$heading" != "Open" ]]; then
+    printf 'Added %s new remote named port(s).\n' "$added"
   fi
 
-  printf '%s:\n' "$heading"
-  for index in "${!new_ports[@]}"; do
-    port="${new_ports[$index]}"
-    name="${new_names[$index]}"
-    if [[ -n "$name" ]]; then
-      printf '  %s -> http://127.0.0.1:%s/\n' "$name" "$port"
-    else
-      printf '  http://127.0.0.1:%s/\n' "$port"
-    fi
-  done
+  print_forwarded_urls
 }
 
 print_loop_help() {
@@ -282,6 +287,7 @@ run_all_mode() {
   control_socket=""
   declare -gA forwarded_ports=()
   declare -gA forwarded_names=()
+  declare -ga forwarded_order=()
 
   trap stop_master EXIT
   trap handle_signal INT TERM
