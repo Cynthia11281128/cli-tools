@@ -4,13 +4,15 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  cli-tools port-list
-  cli-tools port-list --remote
+  cli-tools port-list [--full]
+  cli-tools port-list --remote [--full]
   port-list
 
 List named port services managed by cli-tools.
 
 Only services started with `cli-tools port-start` are shown.
+By default, show name, port, and started time. With --full, also show status,
+PID, log path, and command.
 With --remote, read CLI_TOOLS_SSH_REMOTE from .env and run port-list over SSH.
 USAGE
 }
@@ -79,7 +81,14 @@ load_env_value() {
 
 run_remote_port_list() {
   local env_file="$repo_dir/.env"
-  local remote remote_cli remote_command
+  local remote remote_cli remote_command full_arg
+  local args=()
+
+  full_arg=""
+  if [[ "$full" -eq 1 ]]; then
+    args+=(--full)
+    full_arg=" --full"
+  fi
 
   require_cmd ssh
 
@@ -91,20 +100,20 @@ run_remote_port_list() {
 
   remote_cli="$(load_env_value "$env_file" "CLI_TOOLS_REMOTE_CLI")"
   if [[ -z "$remote_cli" ]]; then
-    remote_command='
+    remote_command="
 if command -v cli-tools >/dev/null 2>&1; then
-  exec cli-tools port-list
-elif [ -x "$HOME/cli-tools/bin/cli-tools" ]; then
-  exec "$HOME/cli-tools/bin/cli-tools" port-list
-elif [ -x "$HOME/.local/bin/cli-tools" ]; then
-  exec "$HOME/.local/bin/cli-tools" port-list
-elif [ -x "$HOME/miniconda3/bin/cli-tools" ]; then
-  exec "$HOME/miniconda3/bin/cli-tools" port-list
+  exec cli-tools port-list$full_arg
+elif [ -x \"\$HOME/cli-tools/bin/cli-tools\" ]; then
+  exec \"\$HOME/cli-tools/bin/cli-tools\" port-list$full_arg
+elif [ -x \"\$HOME/.local/bin/cli-tools\" ]; then
+  exec \"\$HOME/.local/bin/cli-tools\" port-list$full_arg
+elif [ -x \"\$HOME/miniconda3/bin/cli-tools\" ]; then
+  exec \"\$HOME/miniconda3/bin/cli-tools\" port-list$full_arg
 fi
 
-printf "%s\n" "error: remote cli-tools not found; set CLI_TOOLS_REMOTE_CLI in local .env to the remote cli-tools path" >&2
+printf \"%s\\n\" \"error: remote cli-tools not found; set CLI_TOOLS_REMOTE_CLI in local .env to the remote cli-tools path\" >&2
 exit 127
-'
+"
     printf 'Remote named port services on %s:\n' "$remote"
     exec ssh "$remote" "$remote_command"
   fi
@@ -113,7 +122,7 @@ exit 127
   esac
 
   printf 'Remote named port services on %s:\n' "$remote"
-  exec ssh "$remote" "$remote_cli" port-list
+  exec ssh "$remote" "$remote_cli" port-list "${args[@]}"
 }
 
 script_path="$(resolve_self "${BASH_SOURCE[0]}")" || {
@@ -126,18 +135,31 @@ repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || {
   exit 1
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+remote=0
+full=0
 
-if [[ "$#" -eq 1 && "${1:-}" == "--remote" ]]; then
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --remote)
+      remote=1
+      ;;
+    --full)
+      full=1
+      ;;
+    *)
+      usage >&2
+      die "unknown argument: $1"
+      ;;
+  esac
+  shift
+done
+
+if [[ "$remote" -eq 1 ]]; then
   run_remote_port_list
-fi
-
-if [[ "$#" -ne 0 ]]; then
-  usage >&2
-  die "expected no arguments or --remote"
 fi
 
 # shellcheck source=../lib/port-registry.bash
@@ -151,4 +173,8 @@ if [[ "$(port_registry_count_entries)" -eq 0 ]]; then
   exit 0
 fi
 
-port_registry_print_entries
+if [[ "$full" -eq 1 ]]; then
+  port_registry_print_entries full
+else
+  port_registry_print_entries
+fi

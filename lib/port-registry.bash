@@ -316,7 +316,9 @@ port_registry_count_entries() {
 }
 
 port_registry_print_entries() {
+  local mode="${1:-summary}"
   local name port pid start_time log_path command_text status first_entry
+  local name_width=4 port_width=4
   local blue="" reset=""
 
   if port_color_enabled; then
@@ -324,26 +326,45 @@ port_registry_print_entries() {
     reset=$'\033[0m'
   fi
 
-  printf '%-20s %-6s %-10s %-8s %-25s %s\n' \
-    "NAME" "PORT" "STATUS" "PID" "STARTED" "LOG"
+  while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
+    [[ -n "$name" ]] || continue
+    if (( ${#name} > name_width )); then
+      name_width="${#name}"
+    fi
+    if (( ${#port} > port_width )); then
+      port_width="${#port}"
+    fi
+  done <"$PORT_REGISTRY"
+
+  if [[ "$mode" == "full" ]]; then
+    printf '%-*s %-*s %-10s %-8s %-25s %s\n' \
+      "$name_width" "NAME" "$port_width" "PORT" "STATUS" "PID" "STARTED" "LOG"
+  else
+    printf '%-*s %-*s %s\n' "$name_width" "NAME" "$port_width" "PORT" "STARTED"
+  fi
 
   first_entry=1
   while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
     [[ -n "$name" ]] || continue
-    if (( first_entry )); then
-      first_entry=0
+    if [[ "$mode" == "full" ]]; then
+      if (( first_entry )); then
+        first_entry=0
+      else
+        printf '\n'
+      fi
+      status="running"
+      if port_is_listening "$port"; then
+        status="listening"
+      fi
+      printf '%b%-*s%b ' "$blue" "$name_width" "$name" "$reset"
+      printf '%b%-*s%b ' "$blue" "$port_width" "$port" "$reset"
+      printf '%-10s %-8s %-25s %s\n' \
+        "$status" "$pid" "$start_time" "$log_path"
+      printf '  command: %s\n' "$command_text"
     else
-      printf '\n'
+      printf '%b%-*s%b ' "$blue" "$name_width" "$name" "$reset"
+      printf '%b%-*s%b %s\n' "$blue" "$port_width" "$port" "$reset" "$start_time"
     fi
-    status="running"
-    if port_is_listening "$port"; then
-      status="listening"
-    fi
-    printf '%b%-20s%b ' "$blue" "$name" "$reset"
-    printf '%b%-6s%b ' "$blue" "$port" "$reset"
-    printf '%-10s %-8s %-25s %s\n' \
-      "$status" "$pid" "$start_time" "$log_path"
-    printf '  command: %s\n' "$command_text"
   done <"$PORT_REGISTRY"
 }
 
