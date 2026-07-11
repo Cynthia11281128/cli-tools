@@ -1,6 +1,6 @@
 # cli-tools
 
-Personal command-line tools exposed through one `cli-tools` shell entrypoint.
+Command-line tools exposed through one `cli-tools` shell entrypoint.
 
 ## Install
 
