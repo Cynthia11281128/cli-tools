@@ -4,15 +4,15 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  cli-tools viewer-ply [PLY_PATH] [--port PORT] [--name NAME] [--host HOST]
+  cli-tools viewer-ply [PLY_FILE_OR_DIR] [--port PORT] [--name NAME] [--host HOST]
   cli-tools viewer-ply --sequence SNAPSHOT_DIR [--port PORT] [--name NAME] [--host HOST]
-  viewer-ply [PLY_PATH] [--port PORT] [--name NAME] [--host HOST]
+  viewer-ply [PLY_FILE_OR_DIR] [--port PORT] [--name NAME] [--host HOST]
   viewer-ply --sequence SNAPSHOT_DIR [--port PORT] [--name NAME] [--host HOST]
 
 Start a lightweight web viewer for an ordinary mesh or point-cloud PLY file,
-or for a directory of PlanarSplatting optimization snapshot PLY files.
-If PLY_PATH is omitted and --sequence is not set, the command prompts for the
-path and service name interactively.
+for a folder of ordinary PLY files, or for a directory of PlanarSplatting
+optimization snapshot PLY files. If PLY_FILE_OR_DIR is omitted and --sequence is
+not set, the command prompts for the path with Tab completion.
 
 Options:
   --sequence DIR   Load a snapshot directory as a timeline.
@@ -24,6 +24,7 @@ Options:
 Examples:
   cli-tools viewer-ply
   cli-tools viewer-ply ~/outputs/scene0000_00_planar_mesh.ply
+  cli-tools viewer-ply ~/outputs/ply_folder
   cli-tools viewer-ply --sequence ~/outputs/exp/optimization_snapshots
   cli-tools viewer-ply /data/model.ply --port 8765 --name my-ply
 
@@ -99,6 +100,38 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 PY
 }
 
+is_ply_path() {
+  local path="${1,,}"
+  [[ "$path" == *.ply ]]
+}
+
+directory_has_ply_files() {
+  local dir="$1"
+  local path
+
+  while IFS= read -r -d '' path; do
+    if is_ply_path "$path"; then
+      return 0
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f -print0)
+
+  return 1
+}
+
+read_ply_path() {
+  local value
+
+  if [[ -t 0 ]]; then
+    IFS= read -e -r -p 'PLY file or folder: ' value ||
+      die "failed to read PLY file or folder"
+  else
+    printf 'PLY file or folder: ' >&2
+    IFS= read -r value || die "failed to read PLY file or folder"
+  fi
+
+  printf '%s\n' "$value"
+}
+
 script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
 bin_dir="$(dirname -- "$script_path")"
 repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
@@ -155,7 +188,7 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --)
       shift
-      [[ "$#" -le 1 ]] || die "expected at most one PLY path"
+      [[ "$#" -le 1 ]] || die "expected at most one PLY file or folder"
       if [[ "$#" -eq 1 ]]; then
         ply_input="$1"
       fi
@@ -165,7 +198,7 @@ while [[ "$#" -gt 0 ]]; do
       die "unknown option: $1"
       ;;
     *)
-      [[ -z "$ply_input" ]] || die "expected at most one PLY path"
+      [[ -z "$ply_input" ]] || die "expected at most one PLY file or folder"
       ply_input="$1"
       shift
       ;;
@@ -174,28 +207,33 @@ done
 
 require_cmd python3
 require_cmd realpath
+require_cmd find
 
 [[ -f "$server_path" ]] || die "missing PLY viewer server: $server_path"
-[[ -z "$ply_input" || -z "$sequence_input" ]] || die "PLY_PATH and --sequence cannot be used together"
+[[ -z "$ply_input" || -z "$sequence_input" ]] || die "PLY_FILE_OR_DIR and --sequence cannot be used together"
 
 if [[ -z "$ply_input" && -z "$sequence_input" ]]; then
-  printf 'PLY path: ' >&2
-  IFS= read -r ply_input || die "failed to read PLY path"
+  ply_input="$(read_ply_path)"
   prompted_for_ply_path="yes"
 fi
 
-[[ -n "$ply_input" || -n "$sequence_input" ]] || die "PLY path or --sequence is required"
+[[ -n "$ply_input" || -n "$sequence_input" ]] || die "PLY file, folder, or --sequence is required"
 
 ply_path=""
+folder_path=""
 sequence_path=""
 
 if [[ -n "$ply_input" ]]; then
   expanded_ply="$(expand_path "$ply_input")"
-  [[ -f "$expanded_ply" ]] || die "PLY file does not exist: $expanded_ply"
-
-  ply_path="$(realpath -- "$expanded_ply")" || die "failed to resolve PLY path: $expanded_ply"
-  lower_ply_path="${ply_path,,}"
-  [[ "$lower_ply_path" == *.ply ]] || die "expected a .ply file: $ply_path"
+  if [[ -f "$expanded_ply" ]]; then
+    is_ply_path "$expanded_ply" || die "expected a .ply file: $expanded_ply"
+    ply_path="$(realpath -- "$expanded_ply")" || die "failed to resolve PLY path: $expanded_ply"
+  elif [[ -d "$expanded_ply" ]]; then
+    directory_has_ply_files "$expanded_ply" || die "folder has no .ply files: $expanded_ply"
+    folder_path="$(realpath -- "$expanded_ply")" || die "failed to resolve PLY folder: $expanded_ply"
+  else
+    die "PLY file or folder does not exist: $expanded_ply"
+  fi
 else
   expanded_sequence="$(expand_path "$sequence_input")"
   [[ -d "$expanded_sequence" ]] || die "sequence directory does not exist: $expanded_sequence"
@@ -225,6 +263,8 @@ fi
 server_args=(python3 "$server_path" --port "$port" --host "$host" --name "$name")
 if [[ -n "$sequence_path" ]]; then
   server_args+=(--sequence "$sequence_path")
+elif [[ -n "$folder_path" ]]; then
+  server_args+=(--folder "$folder_path")
 else
   server_args+=(--ply "$ply_path")
 fi
@@ -239,6 +279,8 @@ fi
 printf 'Viewer URL: http://%s:%s/\n' "$url_host" "$port"
 if [[ -n "$sequence_path" ]]; then
   printf 'PLY sequence: %s\n' "$sequence_path"
+elif [[ -n "$folder_path" ]]; then
+  printf 'PLY folder: %s\n' "$folder_path"
 else
   printf 'PLY file: %s\n' "$ply_path"
 fi

@@ -125,8 +125,8 @@ Available keys:
 |---|---|---|
 | `cli-tools viewer-glb` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools viewer-glb /path/to/model.glb` |
 | `cli-tools viewer-img` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools viewer-img /path/to/images` |
-| `cli-tools viewer-ply` | Start a lightweight Three.js viewer for a `.ply` file or PLY sequence directory and register it as a named port service. | `cli-tools viewer-ply /path/to/a.ply --port 8765` |
-| `cli-tools viewer-ply-add` | Add another `.ply` file to an already running ordinary `viewer-ply` page by port. Sequence viewers are not supported. | `cli-tools viewer-ply-add /path/to/b.ply 8765` |
+| `cli-tools viewer-ply` | Start a lightweight Three.js viewer for a `.ply` file, ordinary PLY folder, or PLY sequence directory and register it as a named port service. | `cli-tools viewer-ply /path/to/a.ply --port 8765` |
+| `cli-tools viewer-ply-add` | Add another `.ply` file to an already running ordinary `viewer-ply` page by port. Folder and sequence viewers are not supported. | `cli-tools viewer-ply-add /path/to/b.ply 8765` |
 | `cli-tools viewer-video` | Start a lightweight web viewer for a `.mp4` or `.mov` video and register it as a named port service. | `cli-tools viewer-video /path/to/video.MOV` |
 
 ### Port
@@ -252,9 +252,14 @@ Start an ordinary mesh or point-cloud PLY viewer:
 
 ```bash
 cli-tools viewer-ply /path/to/model.ply
+cli-tools viewer-ply /path/to/ply-folder
 cli-tools viewer-ply --sequence /path/to/optimization_snapshots
 cli-tools viewer-ply /path/to/model.ply --port 8765 --name scene-view
 ```
+
+Ordinary PLY folder mode reads top-level `.ply` files, shows a left side list
+for direct selection, and supports left/right arrow key navigation.
+`--sequence` is reserved for PlanarSplatting snapshot timelines.
 
 Start a single-image or image-folder viewer:
 

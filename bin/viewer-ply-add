@@ -8,7 +8,8 @@ Usage:
   viewer-ply-add [PLY_PATH] [PORT]
 
 Add another .ply file to an existing ordinary cli-tools viewer-ply web page.
-The target viewer must be a normal PLY viewer, not a --sequence timeline viewer.
+The target viewer must be a normal single/multi PLY viewer, not a folder or
+--sequence timeline viewer.
 
 If PLY_PATH or PORT is omitted, the command prompts for it interactively.
 

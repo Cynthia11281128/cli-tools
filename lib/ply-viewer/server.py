@@ -27,6 +27,8 @@ class ViewerServer(ThreadingHTTPServer):
     ply_items: list[dict[str, Any]]
     ply_lock: threading.Lock
     next_ply_id: int
+    folder_path: Path | None
+    folder_items: list[dict[str, Any]]
     sequence_dir: Path | None
     index_path: Path
     viewer_name: str
@@ -62,8 +64,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/ply-files":
-            if self.server.mode == "sequence":
-                self._send_json({"error": "PLY add is not supported for sequence viewers"}, head_only, HTTPStatus.CONFLICT)
+            if self.server.mode != "multi":
+                self._send_json({"error": "PLY add is not supported for this viewer"}, head_only, HTTPStatus.CONFLICT)
                 return
             self._send_json(self._ply_files_payload(), head_only)
             return
@@ -75,6 +77,10 @@ class ViewerHandler(BaseHTTPRequestHandler):
 
         if self.server.mode == "multi" and path.startswith("/models/"):
             self._send_model_file(path[len("/models/") :], head_only)
+            return
+
+        if self.server.mode == "folder" and path.startswith("/folder-models/"):
+            self._send_folder_model_file(path[len("/folder-models/") :], head_only)
             return
 
         if self.server.mode == "sequence":
@@ -102,6 +108,16 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 "path": first["path"],
                 "size": first["size"],
                 "count": len(files),
+            }
+
+        if self.server.mode == "folder":
+            assert self.server.folder_path is not None
+            return {
+                "mode": "folder",
+                "name": self.server.viewer_name,
+                "path": str(self.server.folder_path),
+                "count": len(self.server.folder_items),
+                "files": [dict(item) for item in self.server.folder_items],
             }
 
         assert self.server.sequence_dir is not None
@@ -212,9 +228,9 @@ class ViewerHandler(BaseHTTPRequestHandler):
         }
 
     def _handle_ply_add(self) -> None:
-        if self.server.mode == "sequence":
+        if self.server.mode != "multi":
             self._send_json(
-                {"error": "PLY add is not supported for sequence viewers"},
+                {"error": "PLY add is not supported for this viewer"},
                 False,
                 HTTPStatus.CONFLICT,
             )
@@ -282,6 +298,19 @@ class ViewerHandler(BaseHTTPRequestHandler):
         with self.server.ply_lock:
             item = next((candidate for candidate in self.server.ply_items if candidate["id"] == item_id), None)
 
+        if item is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "file not found")
+            return
+
+        self._send_file(Path(item["path"]), "application/octet-stream", head_only)
+
+    def _send_folder_model_file(self, rel_url: str, head_only: bool) -> None:
+        file_name = unquote(rel_url)
+        if "/" in file_name or "\\" in file_name or file_name in {"", ".", ".."}:
+            self.send_error(HTTPStatus.NOT_FOUND, "file not found")
+            return
+
+        item = next((candidate for candidate in self.server.folder_items if candidate["name"] == file_name), None)
         if item is None:
             self.send_error(HTTPStatus.NOT_FOUND, "file not found")
             return
@@ -385,6 +414,37 @@ def register_ply_path(server: ViewerServer, path: Path) -> tuple[dict[str, Any],
         return dict(item), True
 
 
+def natural_name_key(path: Path) -> list[Any]:
+    parts = re.split(r"(\d+)", path.name.casefold())
+    return [int(part) if part.isdigit() else part for part in parts]
+
+
+def folder_ply_item_payload(path: Path) -> dict[str, Any]:
+    return {
+        "name": path.name,
+        "path": str(path),
+        "size": path.stat().st_size,
+        "url": f"/folder-models/{quote(path.name, safe='')}",
+    }
+
+
+def collect_folder_ply_items(folder_path: Path) -> list[dict[str, Any]]:
+    root = folder_path.resolve()
+    ply_paths: list[Path] = []
+
+    for path in folder_path.iterdir():
+        if not path.is_file() or path.suffix.lower() != ".ply":
+            continue
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        ply_paths.append(resolved)
+
+    return [folder_ply_item_payload(path) for path in sorted(ply_paths, key=natural_name_key)]
+
+
 def safe_resolve_under(root: Path | None, rel_path: str) -> Path | None:
     if root is None:
         return None
@@ -425,9 +485,10 @@ def estimate_rectangle_plane_count(path: Path) -> int | None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Serve a PLY file or PLY snapshot sequence in a browser viewer.")
+    parser = argparse.ArgumentParser(description="Serve a PLY file, PLY folder, or PLY snapshot sequence in a browser viewer.")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--ply", help="PLY file to serve")
+    mode.add_argument("--folder", help="Folder containing ordinary PLY files to browse")
     mode.add_argument("--sequence", help="Directory containing optimization snapshots or legacy plane_plots")
     parser.add_argument("--port", required=True, type=int, help="Port to bind")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
@@ -444,6 +505,8 @@ def main() -> int:
         return 2
 
     ply_path = None
+    folder_path = None
+    folder_items: list[dict[str, Any]] = []
     sequence_dir = None
     mode = "multi"
     default_name = ""
@@ -455,6 +518,17 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
             return 2
         default_name = ply_path.name
+    elif args.folder:
+        mode = "folder"
+        folder_path = Path(args.folder).expanduser().resolve()
+        if not folder_path.is_dir():
+            print(f"error: PLY folder does not exist: {folder_path}", file=sys.stderr)
+            return 2
+        folder_items = collect_folder_ply_items(folder_path)
+        if not folder_items:
+            print(f"error: folder has no .ply files: {folder_path}", file=sys.stderr)
+            return 2
+        default_name = folder_path.name
     else:
         mode = "sequence"
         sequence_dir = Path(args.sequence).expanduser().resolve()
@@ -469,6 +543,8 @@ def main() -> int:
     server.ply_items = []
     server.ply_lock = threading.Lock()
     server.next_ply_id = 1
+    server.folder_path = folder_path
+    server.folder_items = folder_items
     server.sequence_dir = sequence_dir
     server.index_path = index_path
     server.viewer_name = args.name or default_name
@@ -478,6 +554,8 @@ def main() -> int:
 
     if mode == "sequence":
         print(f"serving PLY sequence {sequence_dir} at http://{args.host}:{args.port}/", flush=True)
+    elif mode == "folder":
+        print(f"serving PLY folder {folder_path} at http://{args.host}:{args.port}/", flush=True)
     else:
         print(f"serving PLY viewer with {ply_path} at http://{args.host}:{args.port}/", flush=True)
     try:

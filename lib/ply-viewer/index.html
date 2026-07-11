@@ -63,7 +63,9 @@
       }
 
       body.multi-mode .topbar,
-      body.multi-mode .timeline {
+      body.multi-mode .timeline,
+      body.folder-mode .topbar,
+      body.folder-mode .timeline {
         left: calc(var(--sidebar-width) + 24px);
       }
 
@@ -190,7 +192,8 @@
         gap: 10px;
       }
 
-      body.multi-mode .ply-panel {
+      body.multi-mode .ply-panel,
+      body.folder-mode .ply-panel {
         display: flex;
       }
 
@@ -226,6 +229,27 @@
         border-radius: 6px;
         background: rgba(255, 255, 255, 0.06);
         padding: 8px;
+      }
+
+      .ply-row.folder-row {
+        width: 100%;
+        height: auto;
+        min-height: 54px;
+        grid-template-columns: 1fr;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+        text-align: left;
+      }
+
+      .ply-row.folder-row:hover {
+        border-color: rgba(131, 211, 197, 0.52);
+        background: rgba(131, 211, 197, 0.12);
+      }
+
+      .ply-row.folder-row.active {
+        border-color: rgba(131, 211, 197, 0.82);
+        background: rgba(131, 211, 197, 0.18);
       }
 
       .ply-row.loading {
@@ -300,7 +324,8 @@
       }
 
       @media (max-width: 760px) {
-        body.multi-mode .ply-panel {
+        body.multi-mode .ply-panel,
+        body.folder-mode .ply-panel {
           top: 12px;
           right: 12px;
           bottom: auto;
@@ -308,12 +333,14 @@
           max-height: 34vh;
         }
 
-        body.multi-mode .topbar {
+        body.multi-mode .topbar,
+        body.folder-mode .topbar {
           top: calc(34vh + 24px);
           left: 12px;
         }
 
-        body.multi-mode .timeline {
+        body.multi-mode .timeline,
+        body.folder-mode .timeline {
           left: 12px;
         }
 
@@ -488,6 +515,8 @@
       let meshStatus = "";
       let verticesStatus = "";
       let mode = "single";
+      let folderItems = [];
+      let currentFolderIndex = 0;
       let multiItems = new Map();
       let multiPollTimer = null;
       let sequence = null;
@@ -749,6 +778,88 @@
           setStatus(`Loading ${fileLabel}${size}`);
         }
         loadGeometry("/model.ply", { frameCamera: true });
+      }
+
+      function renderFolderList() {
+        plyPanelSubtitle.textContent = `${folderItems.length} file${folderItems.length === 1 ? "" : "s"}`;
+        plyList.replaceChildren();
+
+        if (!folderItems.length) {
+          const empty = document.createElement("div");
+          empty.className = "panel-subtitle";
+          empty.textContent = "No PLY files";
+          plyList.appendChild(empty);
+          return;
+        }
+
+        for (const [index, item] of folderItems.entries()) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "ply-row folder-row";
+          row.classList.toggle("active", index === currentFolderIndex);
+          row.addEventListener("click", () => loadFolderItem(index, false));
+
+          const details = document.createElement("div");
+          details.className = "ply-details";
+
+          const name = document.createElement("div");
+          name.className = "ply-name";
+          name.textContent = item.name || `PLY ${index + 1}`;
+
+          const path = document.createElement("div");
+          path.className = "ply-path";
+          path.title = item.path || "";
+          path.textContent = item.path || "";
+
+          const meta = document.createElement("div");
+          meta.className = "ply-meta";
+          meta.textContent = formatBytes(Number(item.size));
+
+          details.append(name, path, meta);
+          row.append(details);
+          plyList.appendChild(row);
+        }
+      }
+
+      function loadFolderItem(index, frameCamera = true) {
+        if (mode !== "folder" || !folderItems.length) {
+          return;
+        }
+
+        currentFolderIndex = (index + folderItems.length) % folderItems.length;
+        const item = folderItems[currentFolderIndex];
+        renderFolderList();
+        const active = plyList.querySelector(".folder-row.active");
+        if (active) {
+          active.scrollIntoView({ block: "nearest" });
+        }
+
+        const size = formatBytes(Number(item.size));
+        setStatus(`${currentFolderIndex + 1} / ${folderItems.length}  ${item.name}${size ? `, ${size}` : ""}`);
+        loadGeometry(item.url, {
+          frameCamera,
+          onLoaded: () => {
+            setStatus(`${currentFolderIndex + 1} / ${folderItems.length}  ${item.name}`);
+          }
+        });
+      }
+
+      async function loadFolder(meta) {
+        mode = "folder";
+        document.body.classList.add("folder-mode");
+        plyPanel.setAttribute("aria-hidden", "false");
+
+        const displayName = meta.name || "PLY Folder";
+        document.title = `${displayName} - PLY Viewer`;
+        fileName.textContent = displayName;
+
+        folderItems = Array.isArray(meta.files) ? meta.files : [];
+        currentFolderIndex = 0;
+        renderFolderList();
+        if (!folderItems.length) {
+          throw new Error("No PLY files found");
+        }
+        loadFolderItem(0, true);
       }
 
       async function fetchPlyFiles() {
@@ -1260,6 +1371,8 @@
           const meta = await loadMeta();
           if (meta.mode === "sequence") {
             await loadSequence(meta);
+          } else if (meta.mode === "folder") {
+            await loadFolder(meta);
           } else if (meta.mode === "multi") {
             await loadMulti(meta);
           } else {
@@ -1283,6 +1396,23 @@
         isPlaying = !isPlaying;
         updateSequenceControls();
         updatePlayTimer();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (mode !== "folder") {
+          return;
+        }
+        const target = event.target;
+        const tagName = target && target.tagName ? target.tagName.toLowerCase() : "";
+        if (tagName === "input" || tagName === "select" || tagName === "textarea") {
+          return;
+        }
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          loadFolderItem(currentFolderIndex - 1, false);
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          loadFolderItem(currentFolderIndex + 1, false);
+        }
       });
       window.addEventListener("resize", resize);
 
