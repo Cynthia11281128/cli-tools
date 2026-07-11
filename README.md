@@ -82,9 +82,9 @@ remote table. Set `CLI_TOOLS_REMOTE_CLI` if the remote `cli-tools` command is
 not on PATH.
 
 Use `cli-tools ssh-tunnel --all` to fetch active remote named ports, connect all
-of them with one SSH tunnel, and print `name -> local URL` lines. While it is
-running, enter `s` to sync newly added remote ports and reprint the full URL
-list, or `q` to stop the tunnel.
+of them with one SSH tunnel, and print `name -> local URL` lines sorted by name.
+While it is running, enter `s` to sync newly added remote ports and reprint the
+full URL list, or `q` to stop the tunnel.
 
 ## GLB Viewer
 

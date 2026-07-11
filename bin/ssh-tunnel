@@ -222,17 +222,27 @@ forward_port() {
 }
 
 print_forwarded_urls() {
-  local port name
+  local port name sort_key
 
   printf 'Open:\n'
-  for port in "${forwarded_order[@]}"; do
+  while IFS=$'\t' read -r sort_key port; do
+    [[ -n "$port" ]] || continue
     name="${forwarded_names[$port]:-}"
     if [[ -n "$name" ]]; then
       printf '  %s -> http://127.0.0.1:%s/\n' "$name" "$port"
     else
       printf '  http://127.0.0.1:%s/\n' "$port"
     fi
-  done
+  done < <(
+    for port in "${forwarded_order[@]}"; do
+      name="${forwarded_names[$port]:-}"
+      if [[ -n "$name" ]]; then
+        printf '%s\t%s\n' "$name" "$port"
+      else
+        printf '%s\t%s\n' "$port" "$port"
+      fi
+    done | sort -f -t $'\t' -k1,1 -k2,2n
+  )
 }
 
 sync_all_ports() {
