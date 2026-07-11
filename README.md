@@ -258,7 +258,8 @@ cli-tools viewer-ply /path/to/model.ply --port 8765 --name scene-view
 ```
 
 Ordinary PLY folder mode reads top-level `.ply` files, shows a left side list
-for direct selection, and supports left/right arrow key navigation.
+for direct selection, supports top-level `.ply` symlinks, and supports
+left/right arrow key navigation.
 `--sequence` is reserved for PlanarSplatting snapshot timelines.
 
 Start a single-image or image-folder viewer:

@@ -414,35 +414,32 @@ def register_ply_path(server: ViewerServer, path: Path) -> tuple[dict[str, Any],
         return dict(item), True
 
 
-def natural_name_key(path: Path) -> list[Any]:
-    parts = re.split(r"(\d+)", path.name.casefold())
+def natural_name_key(name: str) -> list[Any]:
+    parts = re.split(r"(\d+)", name.casefold())
     return [int(part) if part.isdigit() else part for part in parts]
 
 
-def folder_ply_item_payload(path: Path) -> dict[str, Any]:
+def folder_ply_item_payload(entry_path: Path, target_path: Path) -> dict[str, Any]:
     return {
-        "name": path.name,
-        "path": str(path),
-        "size": path.stat().st_size,
-        "url": f"/folder-models/{quote(path.name, safe='')}",
+        "name": entry_path.name,
+        "path": str(target_path),
+        "size": target_path.stat().st_size,
+        "url": f"/folder-models/{quote(entry_path.name, safe='')}",
     }
 
 
 def collect_folder_ply_items(folder_path: Path) -> list[dict[str, Any]]:
-    root = folder_path.resolve()
-    ply_paths: list[Path] = []
+    ply_entries: list[tuple[Path, Path]] = []
 
-    for path in folder_path.iterdir():
-        if not path.is_file() or path.suffix.lower() != ".ply":
+    for entry_path in folder_path.iterdir():
+        if entry_path.suffix.lower() != ".ply" or not entry_path.is_file():
             continue
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            continue
-        ply_paths.append(resolved)
+        ply_entries.append((entry_path, entry_path.resolve()))
 
-    return [folder_ply_item_payload(path) for path in sorted(ply_paths, key=natural_name_key)]
+    return [
+        folder_ply_item_payload(entry_path, target_path)
+        for entry_path, target_path in sorted(ply_entries, key=lambda item: natural_name_key(item[0].name))
+    ]
 
 
 def safe_resolve_under(root: Path | None, rel_path: str) -> Path | None:

@@ -110,10 +110,10 @@ directory_has_ply_files() {
   local path
 
   while IFS= read -r -d '' path; do
-    if is_ply_path "$path"; then
+    if is_ply_path "$path" && [[ -f "$path" ]]; then
       return 0
     fi
-  done < <(find "$dir" -maxdepth 1 -type f -print0)
+  done < <(find "$dir" -maxdepth 1 \( -type f -o -type l \) -print0)
 
   return 1
 }
