@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools viewer-ply-add [PLY_PATH] [PORT]
+  viewer-ply-add [PLY_PATH] [PORT]
+
+Add another .ply file to an existing ordinary cli-tools viewer-ply web page.
+The target viewer must be a normal PLY viewer, not a --sequence timeline viewer.
+
+If PLY_PATH or PORT is omitted, the command prompts for it interactively.
+
+Examples:
+  cli-tools viewer-ply /data/a.ply --port 8765
+  cli-tools viewer-ply-add /data/b.ply 8765
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+print_viewer_ply_choices() {
+  local registry="$1"
+
+  python3 - "$registry" <<'PY' >&2
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+registry = sys.argv[1]
+
+if not os.path.isfile(registry):
+    print("No active viewer-ply services found.")
+    sys.exit(0)
+
+choices = []
+with open(registry, "r", encoding="utf-8") as handle:
+    for line in handle:
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        parts = line.split("\t", 5)
+        if len(parts) != 6:
+            continue
+        name, port, pid, start_time, log_path, command = parts
+        if not port.isdigit() or not pid.isdigit():
+            continue
+        try:
+            os.kill(-int(pid), 0)
+        except OSError:
+            continue
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ply-files", timeout=0.5) as response:
+                if response.status != 200:
+                    continue
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+            continue
+
+        files = payload.get("files") if isinstance(payload, dict) else None
+        if not isinstance(files, list):
+            continue
+        first = files[0].get("name") if files and isinstance(files[0], dict) else ""
+        choices.append((name, int(port), len(files), first or "-", start_time))
+
+if not choices:
+    print("No active viewer-ply services with add support found.")
+    sys.exit(0)
+
+name_width = max(len("NAME"), *(len(choice[0]) for choice in choices))
+port_width = max(len("PORT"), *(len(str(choice[1])) for choice in choices))
+files_width = max(len("FILES"), *(len(str(choice[2])) for choice in choices))
+
+print("Available viewer-ply ports:")
+print(f"  {'NAME':<{name_width}} {'PORT':>{port_width}} {'FILES':>{files_width}} FIRST_PLY")
+for name, port, count, first, _start_time in sorted(choices, key=lambda item: (item[0].lower(), item[1])):
+    print(f"  {name:<{name_width}} {port:>{port_width}} {count:>{files_width}} {first}")
+PY
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+registry_path="$repo_dir/.cache/ports/registry.tsv"
+
+ply_input=""
+port=""
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      if [[ -z "$ply_input" ]]; then
+        ply_input="$1"
+      elif [[ -z "$port" ]]; then
+        port="$1"
+      else
+        die "expected at most PLY_PATH and PORT"
+      fi
+      shift
+      ;;
+  esac
+done
+
+while [[ "$#" -gt 0 ]]; do
+  if [[ -z "$ply_input" ]]; then
+    ply_input="$1"
+  elif [[ -z "$port" ]]; then
+    port="$1"
+  else
+    die "expected at most PLY_PATH and PORT"
+  fi
+  shift
+done
+
+require_cmd python3
+require_cmd realpath
+
+if [[ -z "$ply_input" ]]; then
+  printf 'PLY path: ' >&2
+  IFS= read -r ply_input || die "failed to read PLY path"
+fi
+
+if [[ -z "$port" ]]; then
+  print_viewer_ply_choices "$registry_path"
+  printf 'viewer-ply port: ' >&2
+  IFS= read -r port || die "failed to read viewer-ply port"
+fi
+
+[[ -n "$ply_input" ]] || die "PLY path is required"
+[[ -n "$port" ]] || die "viewer-ply port is required"
+validate_port "$port"
+
+expanded_ply="$(expand_path "$ply_input")"
+[[ -f "$expanded_ply" ]] || die "PLY file does not exist: $expanded_ply"
+
+ply_path="$(realpath -- "$expanded_ply")" || die "failed to resolve PLY path: $expanded_ply"
+lower_ply_path="${ply_path,,}"
+[[ "$lower_ply_path" == *.ply ]] || die "expected a .ply file: $ply_path"
+
+python3 - "$port" "$ply_path" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+port = int(sys.argv[1])
+ply_path = sys.argv[2]
+url = f"http://127.0.0.1:{port}/api/ply-add"
+body = json.dumps({"path": ply_path}).encode("utf-8")
+request = urllib.request.Request(
+    url,
+    data=body,
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        response_body = response.read()
+except urllib.error.HTTPError as error:
+    response_body = error.read()
+    try:
+        payload = json.loads(response_body.decode("utf-8"))
+        message = payload.get("error") or response_body.decode("utf-8", errors="replace")
+    except Exception:
+        message = response_body.decode("utf-8", errors="replace") or error.reason
+    print(f"error: viewer rejected add request ({error.code}): {message}", file=sys.stderr)
+    sys.exit(2)
+except urllib.error.URLError as error:
+    print(f"error: failed to connect to viewer on port {port}: {error.reason}", file=sys.stderr)
+    sys.exit(2)
+
+try:
+    payload = json.loads(response_body.decode("utf-8"))
+except json.JSONDecodeError as error:
+    print(f"error: viewer returned invalid JSON: {error}", file=sys.stderr)
+    sys.exit(2)
+
+item = payload.get("item") or {}
+status = payload.get("status") or "ok"
+name = item.get("name") or ply_path
+count = len(payload.get("files") or [])
+
+print(f"Status: {status}")
+print(f"PLY: {name}")
+print(f"Files in viewer: {count}")
+print(f"Viewer URL: http://127.0.0.1:{port}/")
+PY

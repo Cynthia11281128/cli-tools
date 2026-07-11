@@ -123,9 +123,10 @@ Available keys:
 
 | Command | Purpose | Typical use |
 |---|---|---|
-| `cli-tools viewer-ply` | Start a lightweight Three.js viewer for a `.ply` file or PLY sequence directory and register it as a named port service. | `cli-tools viewer-ply --sequence /path/to/optimization_snapshots` |
 | `cli-tools viewer-glb` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools viewer-glb /path/to/model.glb` |
 | `cli-tools viewer-img` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools viewer-img /path/to/images` |
+| `cli-tools viewer-ply` | Start a lightweight Three.js viewer for a `.ply` file or PLY sequence directory and register it as a named port service. | `cli-tools viewer-ply /path/to/a.ply --port 8765` |
+| `cli-tools viewer-ply-add` | Add another `.ply` file to an already running ordinary `viewer-ply` page by port. Sequence viewers are not supported. | `cli-tools viewer-ply-add /path/to/b.ply 8765` |
 | `cli-tools viewer-video` | Start a lightweight web viewer for a `.mp4` or `.mov` video and register it as a named port service. | `cli-tools viewer-video /path/to/video.MOV` |
 
 ### Port

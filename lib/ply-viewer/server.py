@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,6 +24,9 @@ class ViewerServer(ThreadingHTTPServer):
 
     mode: str
     ply_path: Path | None
+    ply_items: list[dict[str, Any]]
+    ply_lock: threading.Lock
+    next_ply_id: int
     sequence_dir: Path | None
     index_path: Path
     viewer_name: str
@@ -30,13 +34,20 @@ class ViewerServer(ThreadingHTTPServer):
 
 class ViewerHandler(BaseHTTPRequestHandler):
     server: ViewerServer
-    server_version = "ply-viewer/1.1"
+    server_version = "ply-viewer/1.2"
 
     def do_GET(self) -> None:
         self._route(head_only=False)
 
     def do_HEAD(self) -> None:
         self._route(head_only=True)
+
+    def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/ply-add":
+            self._handle_ply_add()
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def _route(self, head_only: bool) -> None:
         parsed = urlparse(self.path)
@@ -50,9 +61,20 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._send_json(self._meta_payload(), head_only)
             return
 
-        if self.server.mode == "single" and path == "/model.ply":
+        if path == "/api/ply-files":
+            if self.server.mode == "sequence":
+                self._send_json({"error": "PLY add is not supported for sequence viewers"}, head_only, HTTPStatus.CONFLICT)
+                return
+            self._send_json(self._ply_files_payload(), head_only)
+            return
+
+        if self.server.mode == "multi" and path == "/model.ply":
             assert self.server.ply_path is not None
             self._send_file(self.server.ply_path, "application/octet-stream", head_only)
+            return
+
+        if self.server.mode == "multi" and path.startswith("/models/"):
+            self._send_model_file(path[len("/models/") :], head_only)
             return
 
         if self.server.mode == "sequence":
@@ -69,14 +91,17 @@ class ViewerHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
     def _meta_payload(self) -> dict[str, Any]:
-        if self.server.mode == "single":
+        if self.server.mode == "multi":
             assert self.server.ply_path is not None
+            files = self._current_ply_items()
+            first = files[0]
             return {
-                "mode": "single",
+                "mode": "multi",
                 "name": self.server.viewer_name,
-                "file_name": self.server.ply_path.name,
-                "path": str(self.server.ply_path),
-                "size": self.server.ply_path.stat().st_size,
+                "file_name": first["name"],
+                "path": first["path"],
+                "size": first["size"],
+                "count": len(files),
             }
 
         assert self.server.sequence_dir is not None
@@ -186,6 +211,83 @@ class ViewerHandler(BaseHTTPRequestHandler):
             "frames": frames,
         }
 
+    def _handle_ply_add(self) -> None:
+        if self.server.mode == "sequence":
+            self._send_json(
+                {"error": "PLY add is not supported for sequence viewers"},
+                False,
+                HTTPStatus.CONFLICT,
+            )
+            return
+
+        try:
+            payload = self._read_json_body()
+            ply_path = resolve_ply_file(payload.get("path"))
+            item, created = register_ply_path(self.server, ply_path)
+        except FileNotFoundError as error:
+            self._send_json({"error": str(error)}, False, HTTPStatus.NOT_FOUND)
+            return
+        except ValueError as error:
+            self._send_json({"error": str(error)}, False, HTTPStatus.BAD_REQUEST)
+            return
+        except OSError as error:
+            self._send_json({"error": f"failed to add PLY: {error}"}, False, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+
+        self._send_json(
+            {
+                "status": "added" if created else "existing",
+                "item": item,
+                "files": self._current_ply_items(),
+            },
+            False,
+        )
+
+    def _read_json_body(self) -> dict[str, Any]:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError as error:
+            raise ValueError("invalid Content-Length") from error
+
+        if length <= 0:
+            raise ValueError("missing JSON request body")
+        if length > 1024 * 1024:
+            raise ValueError("JSON request body is too large")
+
+        body = self.rfile.read(length)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError("invalid JSON request body") from error
+        if not isinstance(payload, dict):
+            raise ValueError("JSON request body must be an object")
+        return payload
+
+    def _ply_files_payload(self) -> dict[str, Any]:
+        return {
+            "mode": "multi",
+            "name": self.server.viewer_name,
+            "files": self._current_ply_items(),
+        }
+
+    def _current_ply_items(self) -> list[dict[str, Any]]:
+        with self.server.ply_lock:
+            return [dict(item) for item in self.server.ply_items]
+
+    def _send_model_file(self, rel_url: str, head_only: bool) -> None:
+        item_id = unquote(rel_url)
+        if item_id.endswith(".ply"):
+            item_id = item_id[:-4]
+
+        with self.server.ply_lock:
+            item = next((candidate for candidate in self.server.ply_items if candidate["id"] == item_id), None)
+
+        if item is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "file not found")
+            return
+
+        self._send_file(Path(item["path"]), "application/octet-stream", head_only)
+
     def _send_sequence_file(self, rel_url: str, allowed_suffixes: set[str], head_only: bool) -> None:
         assert self.server.sequence_dir is not None
         rel_path = unquote(rel_url)
@@ -208,9 +310,9 @@ class ViewerHandler(BaseHTTPRequestHandler):
             content_type = "image/webp"
         self._send_file(path, content_type, head_only)
 
-    def _send_json(self, payload: dict[str, Any], head_only: bool) -> None:
+    def _send_json(self, payload: dict[str, Any], head_only: bool, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -243,6 +345,44 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
         except BrokenPipeError:
             return
+
+
+def resolve_ply_file(value: Any) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("path must be a non-empty string")
+
+    path = Path(value).expanduser().resolve()
+    if path.suffix.lower() != ".ply":
+        raise ValueError(f"expected a .ply file: {path}")
+    if not path.is_file():
+        raise FileNotFoundError(f"PLY file does not exist: {path}")
+    return path
+
+
+def ply_item_payload(item_id: str, path: Path) -> dict[str, Any]:
+    return {
+        "id": item_id,
+        "name": path.name,
+        "path": str(path),
+        "size": path.stat().st_size,
+        "url": f"/models/{quote(item_id, safe='')}.ply",
+    }
+
+
+def register_ply_path(server: ViewerServer, path: Path) -> tuple[dict[str, Any], bool]:
+    resolved = path.resolve()
+    with server.ply_lock:
+        for item in server.ply_items:
+            if item["path"] == str(resolved):
+                return dict(item), False
+
+        item_id = f"ply-{server.next_ply_id}"
+        server.next_ply_id += 1
+        item = ply_item_payload(item_id, resolved)
+        server.ply_items.append(item)
+        if server.ply_path is None:
+            server.ply_path = resolved
+        return dict(item), True
 
 
 def safe_resolve_under(root: Path | None, rel_path: str) -> Path | None:
@@ -305,16 +445,14 @@ def main() -> int:
 
     ply_path = None
     sequence_dir = None
-    mode = "single"
+    mode = "multi"
     default_name = ""
 
     if args.ply:
-        ply_path = Path(args.ply).expanduser().resolve()
-        if not ply_path.is_file():
-            print(f"error: PLY file does not exist: {ply_path}", file=sys.stderr)
-            return 2
-        if ply_path.suffix.lower() != ".ply":
-            print(f"error: expected a .ply file: {ply_path}", file=sys.stderr)
+        try:
+            ply_path = resolve_ply_file(args.ply)
+        except (FileNotFoundError, ValueError) as error:
+            print(f"error: {error}", file=sys.stderr)
             return 2
         default_name = ply_path.name
     else:
@@ -327,15 +465,21 @@ def main() -> int:
 
     server = ViewerServer((args.host, args.port), ViewerHandler)
     server.mode = mode
-    server.ply_path = ply_path
+    server.ply_path = None
+    server.ply_items = []
+    server.ply_lock = threading.Lock()
+    server.next_ply_id = 1
     server.sequence_dir = sequence_dir
     server.index_path = index_path
     server.viewer_name = args.name or default_name
+    if mode == "multi":
+        assert ply_path is not None
+        register_ply_path(server, ply_path)
 
     if mode == "sequence":
         print(f"serving PLY sequence {sequence_dir} at http://{args.host}:{args.port}/", flush=True)
     else:
-        print(f"serving {ply_path} at http://{args.host}:{args.port}/", flush=True)
+        print(f"serving PLY viewer with {ply_path} at http://{args.host}:{args.port}/", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

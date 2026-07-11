@@ -14,6 +14,7 @@
         --muted: #b9bdc7;
         --accent: #83d3c5;
         --warn: #f2b84b;
+        --sidebar-width: 280px;
       }
 
       * {
@@ -40,7 +41,8 @@
 
       .topbar,
       .timeline,
-      .preview {
+      .preview,
+      .ply-panel {
         position: fixed;
         z-index: 2;
         border: 1px solid var(--panel-border);
@@ -58,6 +60,11 @@
         gap: 10px;
         min-height: 44px;
         padding: 8px 10px;
+      }
+
+      body.multi-mode .topbar,
+      body.multi-mode .timeline {
+        left: calc(var(--sidebar-width) + 24px);
       }
 
       .file {
@@ -172,6 +179,89 @@
         display: grid;
       }
 
+      .ply-panel {
+        top: 12px;
+        bottom: 12px;
+        left: 12px;
+        display: none;
+        width: var(--sidebar-width);
+        padding: 10px;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      body.multi-mode .ply-panel {
+        display: flex;
+      }
+
+      .panel-title {
+        color: var(--text);
+        font-size: 13px;
+        line-height: 18px;
+        font-weight: 700;
+      }
+
+      .panel-subtitle {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 15px;
+      }
+
+      .ply-list {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: 8px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .ply-row {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 8px;
+        align-items: start;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 8px;
+      }
+
+      .ply-row.loading {
+        border-color: rgba(131, 211, 197, 0.45);
+      }
+
+      .ply-row.error {
+        border-color: rgba(242, 184, 75, 0.65);
+      }
+
+      .ply-details {
+        min-width: 0;
+      }
+
+      .ply-name,
+      .ply-path,
+      .ply-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .ply-name {
+        color: var(--text);
+        font-size: 12px;
+        line-height: 16px;
+        font-weight: 650;
+      }
+
+      .ply-path,
+      .ply-meta {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 15px;
+      }
+
       #frameSlider {
         width: 100%;
       }
@@ -210,6 +300,23 @@
       }
 
       @media (max-width: 760px) {
+        body.multi-mode .ply-panel {
+          top: 12px;
+          right: 12px;
+          bottom: auto;
+          width: auto;
+          max-height: 34vh;
+        }
+
+        body.multi-mode .topbar {
+          top: calc(34vh + 24px);
+          left: 12px;
+        }
+
+        body.multi-mode .timeline {
+          left: 12px;
+        }
+
         .topbar {
           align-items: stretch;
           flex-direction: column;
@@ -257,6 +364,14 @@
   </head>
   <body>
     <canvas id="viewer"></canvas>
+    <aside id="plyPanel" class="ply-panel">
+      <div>
+        <div class="panel-title">PLY files</div>
+        <div id="plyPanelSubtitle" class="panel-subtitle">Waiting for files</div>
+      </div>
+      <div id="plyList" class="ply-list"></div>
+    </aside>
+
     <div class="topbar">
       <div class="file">
         <div id="fileName" class="name">PLY Viewer</div>
@@ -327,6 +442,9 @@
       const fpsSelect = document.getElementById("fpsSelect");
       const preview = document.getElementById("preview");
       const previewImage = document.getElementById("previewImage");
+      const plyPanel = document.getElementById("plyPanel");
+      const plyPanelSubtitle = document.getElementById("plyPanelSubtitle");
+      const plyList = document.getElementById("plyList");
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x111218);
@@ -354,6 +472,9 @@
       fillLight.position.set(-4, 2, -3);
       scene.add(fillLight);
 
+      const modelRoot = new THREE.Group();
+      scene.add(modelRoot);
+
       const grid = new THREE.GridHelper(2, 20, 0x4d5360, 0x2c3038);
       grid.visible = false;
       scene.add(grid);
@@ -367,6 +488,8 @@
       let meshStatus = "";
       let verticesStatus = "";
       let mode = "single";
+      let multiItems = new Map();
+      let multiPollTimer = null;
       let sequence = null;
       let frames = [];
       let currentFrameIndex = 0;
@@ -437,6 +560,11 @@
         if (pointMaterial) {
           pointMaterial.size = basePointSize * Number(pointSize.value);
         }
+        for (const item of multiItems.values()) {
+          if (item.pointMaterial) {
+            item.pointMaterial.size = item.basePointSize * Number(pointSize.value);
+          }
+        }
       }
 
       function updateGridVisibility() {
@@ -466,6 +594,11 @@
       }
 
       function updateDisplayMode() {
+        if (mode === "multi") {
+          updateMultiVisibility();
+          return;
+        }
+
         if (!meshObject || !vertexObject) {
           verticesOnlyControl.style.visibility = "hidden";
           pointControl.style.visibility = pointMaterial ? "visible" : "hidden";
@@ -616,6 +749,358 @@
           setStatus(`Loading ${fileLabel}${size}`);
         }
         loadGeometry("/model.ply", { frameCamera: true });
+      }
+
+      async function fetchPlyFiles() {
+        const response = await fetch("/api/ply-files", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load PLY files");
+        }
+        return response.json();
+      }
+
+      function renderPlyList() {
+        const items = Array.from(multiItems.values());
+        plyPanelSubtitle.textContent = `${items.length} file${items.length === 1 ? "" : "s"}`;
+        plyList.replaceChildren();
+
+        if (!items.length) {
+          const empty = document.createElement("div");
+          empty.className = "panel-subtitle";
+          empty.textContent = "No PLY files";
+          plyList.appendChild(empty);
+          return;
+        }
+
+        for (const item of items) {
+          const row = document.createElement("label");
+          row.className = "ply-row";
+          if (item.loading) {
+            row.classList.add("loading");
+          }
+          if (item.error) {
+            row.classList.add("error");
+          }
+
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = item.visible;
+          checkbox.addEventListener("change", () => {
+            item.visible = checkbox.checked;
+            updateMultiVisibility(false);
+            renderPlyList();
+          });
+
+          const details = document.createElement("div");
+          details.className = "ply-details";
+
+          const name = document.createElement("div");
+          name.className = "ply-name";
+          name.textContent = item.name || item.id;
+
+          const path = document.createElement("div");
+          path.className = "ply-path";
+          path.title = item.path || "";
+          path.textContent = item.path || "";
+
+          const meta = document.createElement("div");
+          meta.className = "ply-meta";
+          meta.textContent = multiItemStatus(item);
+
+          details.append(name, path, meta);
+          row.append(checkbox, details);
+          plyList.appendChild(row);
+        }
+      }
+
+      function multiItemStatus(item) {
+        const size = formatBytes(item.size);
+        if (item.error) {
+          return item.error;
+        }
+        if (item.loading) {
+          const progress = Number.isFinite(item.progress) ? ` ${item.progress}%` : "";
+          return `loading${progress}${size ? `, ${size}` : ""}`;
+        }
+        if (item.loaded) {
+          const kind = item.hasMesh ? "mesh" : "points";
+          const count = Number.isFinite(item.vertexCount) ? `${item.vertexCount.toLocaleString()} vertices` : "loaded";
+          return `${count}, ${kind}${size ? `, ${size}` : ""}`;
+        }
+        return `queued${size ? `, ${size}` : ""}`;
+      }
+
+      function syncPlyFiles(payload) {
+        const files = Array.isArray(payload.files) ? payload.files : [];
+        for (const file of files) {
+          if (!file || !file.id || !file.url) {
+            continue;
+          }
+
+          let item = multiItems.get(file.id);
+          if (!item) {
+            item = {
+              id: file.id,
+              name: file.name || file.id,
+              path: file.path || "",
+              size: Number(file.size),
+              url: file.url,
+              visible: true,
+              loading: false,
+              loaded: false,
+              error: "",
+              objects: []
+            };
+            multiItems.set(file.id, item);
+            loadMultiItem(item);
+          } else {
+            item.name = file.name || item.name;
+            item.path = file.path || item.path;
+            item.size = Number(file.size);
+            item.url = file.url || item.url;
+          }
+        }
+        renderPlyList();
+      }
+
+      function loadMultiItem(item) {
+        if (item.loading || item.loaded) {
+          return;
+        }
+
+        item.loading = true;
+        item.error = "";
+        renderPlyList();
+
+        const loader = new PLYLoader();
+        const suffix = item.url.includes("?") ? "&" : "?";
+        loader.load(
+          `${item.url}${suffix}t=${Date.now()}`,
+          (geometry) => {
+            try {
+              installMultiGeometry(item, geometry);
+            } catch (error) {
+              console.error(error);
+              geometry.dispose();
+              item.loading = false;
+              item.error = error.message || "Failed to display PLY";
+              renderPlyList();
+              updateMultiVisibility(false);
+              setStatus(item.error, true);
+            }
+          },
+          (event) => {
+            if (event.lengthComputable && event.total > 0) {
+              item.progress = Math.round((event.loaded / event.total) * 100);
+              setStatus(`Loading ${item.name} ${item.progress}%`);
+              renderPlyList();
+            }
+          },
+          (error) => {
+            console.error(error);
+            item.loading = false;
+            item.error = "Failed to load PLY";
+            renderPlyList();
+            updateMultiVisibility(false);
+            setStatus(item.error, true);
+          }
+        );
+      }
+
+      function installMultiGeometry(item, geometry) {
+        if (!geometry.hasAttribute("position")) {
+          throw new Error("PLY file has no vertex positions");
+        }
+
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        const box = geometry.boundingBox.clone();
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const radius = geometry.boundingSphere ? geometry.boundingSphere.radius : Math.max(size.x, size.y, size.z, 1);
+        const hasFaces = Boolean(geometry.index && geometry.index.count > 0);
+        const hasColors = geometry.hasAttribute("color");
+        const vertexCount = geometry.attributes.position.count;
+        const objects = [];
+
+        if (hasFaces) {
+          geometry.computeVertexNormals();
+          const meshMaterial = new THREE.MeshStandardMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            metalness: 0.0,
+            roughness: 0.82,
+            side: THREE.DoubleSide,
+            vertexColors: hasColors
+          });
+          const mesh = new THREE.Mesh(geometry, meshMaterial);
+
+          const vertexGeometry = geometry.clone();
+          vertexGeometry.setIndex(null);
+          const itemBasePointSize = Math.max(radius / 850, 0.0005);
+          const itemPointMaterial = new THREE.PointsMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            size: itemBasePointSize * Number(pointSize.value),
+            sizeAttenuation: true,
+            vertexColors: hasColors
+          });
+          const points = new THREE.Points(vertexGeometry, itemPointMaterial);
+
+          item.mesh = mesh;
+          item.points = points;
+          item.pointMaterial = itemPointMaterial;
+          item.basePointSize = itemBasePointSize;
+          item.hasMesh = true;
+          objects.push(mesh, points);
+        } else {
+          const itemBasePointSize = Math.max(radius / 850, 0.0005);
+          const itemPointMaterial = new THREE.PointsMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            size: itemBasePointSize * Number(pointSize.value),
+            sizeAttenuation: true,
+            vertexColors: hasColors
+          });
+          const points = new THREE.Points(geometry, itemPointMaterial);
+
+          item.points = points;
+          item.pointMaterial = itemPointMaterial;
+          item.basePointSize = itemBasePointSize;
+          item.hasMesh = false;
+          objects.push(points);
+        }
+
+        for (const object of objects) {
+          modelRoot.add(object);
+        }
+
+        item.objects = objects;
+        item.box = box;
+        item.radius = radius;
+        item.vertexCount = vertexCount;
+        item.loading = false;
+        item.loaded = true;
+        item.progress = null;
+        item.error = "";
+        updateMultiVisibility(true);
+        renderPlyList();
+      }
+
+      function updateMultiVisibility(frameCamera = false) {
+        if (mode !== "multi") {
+          return;
+        }
+
+        const showVertices = verticesOnly.checked;
+        let loaded = 0;
+        let loading = 0;
+        let visibleLoaded = 0;
+        let errors = 0;
+        let hasMesh = false;
+        let hasPointCloud = false;
+
+        for (const item of multiItems.values()) {
+          if (item.loading) {
+            loading += 1;
+          }
+          if (item.error) {
+            errors += 1;
+          }
+          if (!item.loaded) {
+            continue;
+          }
+
+          loaded += 1;
+          hasMesh = hasMesh || Boolean(item.hasMesh);
+          hasPointCloud = hasPointCloud || !item.hasMesh;
+          if (item.visible) {
+            visibleLoaded += 1;
+          }
+
+          if (item.mesh && item.points) {
+            item.mesh.visible = item.visible && !showVertices;
+            item.points.visible = item.visible && showVertices;
+          } else if (item.points) {
+            item.points.visible = item.visible;
+          }
+        }
+
+        verticesOnlyControl.style.visibility = hasMesh ? "visible" : "hidden";
+        pointControl.style.visibility = loaded && (showVertices || hasPointCloud) ? "visible" : "hidden";
+        frameMultiVisible(frameCamera);
+
+        const parts = [];
+        if (loaded) {
+          parts.push(`${visibleLoaded}/${loaded} visible`);
+        }
+        if (loading) {
+          parts.push(`${loading} loading`);
+        }
+        if (errors) {
+          parts.push(`${errors} failed`);
+        }
+        if (!parts.length) {
+          parts.push(`${multiItems.size} queued`);
+        }
+        setStatus(parts.join(", "), errors > 0);
+      }
+
+      function frameMultiVisible(frameCamera = false) {
+        const combined = new THREE.Box3();
+        let hasVisible = false;
+
+        for (const item of multiItems.values()) {
+          if (!item.loaded || !item.visible || !item.box) {
+            continue;
+          }
+          combined.union(item.box);
+          hasVisible = true;
+        }
+
+        if (!hasVisible) {
+          modelRoot.position.set(0, 0, 0);
+          return;
+        }
+
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        combined.getCenter(center);
+        combined.getSize(size);
+        modelRoot.position.set(-center.x, -center.y, -center.z);
+
+        const radius = Math.max(size.length() / 2, 0.001);
+        if (frameCamera) {
+          frameObject(radius);
+        } else {
+          lastFrameRadius = radius;
+          grid.scale.setScalar(radius);
+          grid.visible = showGrid.checked;
+        }
+      }
+
+      async function refreshMultiFiles() {
+        if (mode !== "multi") {
+          return;
+        }
+        try {
+          const payload = await fetchPlyFiles();
+          syncPlyFiles(payload);
+          updateMultiVisibility(false);
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message || "Failed to refresh PLY files", true);
+        }
+      }
+
+      async function loadMulti(meta) {
+        mode = "multi";
+        document.body.classList.add("multi-mode");
+        plyPanel.setAttribute("aria-hidden", "false");
+        const displayName = meta.name || meta.file_name || "PLY Viewer";
+        document.title = `${displayName} - PLY Viewer`;
+        fileName.textContent = displayName;
+        setStatus("Loading PLY files");
+
+        await refreshMultiFiles();
+        multiPollTimer = setInterval(refreshMultiFiles, 1000);
       }
 
       async function fetchSequence() {
@@ -775,6 +1260,8 @@
           const meta = await loadMeta();
           if (meta.mode === "sequence") {
             await loadSequence(meta);
+          } else if (meta.mode === "multi") {
+            await loadMulti(meta);
           } else {
             await loadSingle(meta);
           }

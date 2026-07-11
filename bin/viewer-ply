@@ -26,6 +26,9 @@ Examples:
   cli-tools viewer-ply ~/outputs/scene0000_00_planar_mesh.ply
   cli-tools viewer-ply --sequence ~/outputs/exp/optimization_snapshots
   cli-tools viewer-ply /data/model.ply --port 8765 --name my-ply
+
+Add another PLY to a running ordinary viewer:
+  cli-tools viewer-ply-add /data/other.ply 8765
 USAGE
 }
 
