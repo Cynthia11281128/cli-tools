@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools codex-add [PROJECT_FOLDER]
+  codex-add [PROJECT_FOLDER]
+
+Open an existing project folder with codexapp.
+
+When PROJECT_FOLDER is omitted, the command prompts for it with directory Tab
+completion starting from CODEX_ADD_ROOT in local .env.
+
+Options:
+  -h, --help  Show this help.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+strip_matching_quotes() {
+  local value="$1"
+  local length="${#value}"
+
+  if [[ "$length" -ge 2 ]]; then
+    if [[ "${value:0:1}" == '"' && "${value:length-1:1}" == '"' ]]; then
+      value="${value:1:length-2}"
+    elif [[ "${value:0:1}" == "'" && "${value:length-1:1}" == "'" ]]; then
+      value="${value:1:length-2}"
+    fi
+  fi
+
+  printf '%s\n' "$value"
+}
+
+load_env_value() {
+  local env_file="$1"
+  local key="$2"
+  local line value=""
+
+  [[ -f "$env_file" ]] || die "missing .env file: $env_file"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*) continue ;;
+      "$key"=*)
+        value="${line#"$key"=}"
+        ;;
+    esac
+  done <"$env_file"
+
+  strip_matching_quotes "$value"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+project_folder=""
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      [[ "$#" -le 1 ]] || die "expected at most one project folder"
+      if [[ "$#" -eq 1 ]]; then
+        project_folder="$1"
+      fi
+      shift "$#"
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      [[ -z "$project_folder" ]] || die "expected at most one project folder"
+      project_folder="$1"
+      shift
+      ;;
+  esac
+done
+
+require_cmd npx
+
+if [[ -z "$project_folder" ]]; then
+  codex_add_root="$(load_env_value "$repo_dir/.env" "CODEX_ADD_ROOT")"
+  [[ -n "$codex_add_root" ]] || die "missing CODEX_ADD_ROOT in $repo_dir/.env"
+  codex_add_root="${codex_add_root%/}/"
+
+  printf 'Project folder: ' >&2
+  if [[ -t 0 ]]; then
+    IFS= read -e -i "$codex_add_root" -r project_folder || die "failed to read project folder"
+  else
+    IFS= read -r project_folder || die "failed to read project folder"
+  fi
+fi
+
+[[ -n "$project_folder" ]] || die "project folder is required"
+
+expanded_project_folder="$(expand_path "$project_folder")"
+[[ -d "$expanded_project_folder" ]] || die "project folder is not a directory: $expanded_project_folder"
+project_folder="$(CDPATH= cd -- "$expanded_project_folder" && pwd)" ||
+  die "failed to resolve project folder: $expanded_project_folder"
+
+exec npx --yes --cache=/tmp/tmp_data/npm-cache codexapp --open-project "$project_folder"

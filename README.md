@@ -38,6 +38,7 @@ completion is missing or broken.
 | Command | Purpose | Typical use |
 |---|---|---|
 | `cli-tools` | List or run toolbox commands with scoped subcommand completion. | `cli-tools list` |
+| `cli-tools codex-add` | Open an existing codexapp project folder. Supports path arguments and interactive directory Tab completion from `CODEX_ADD_ROOT`. | `cli-tools codex-add /path/to/project` |
 | `cli-tools codex-web` | Prompt for a project path and port, then start codexapp through `port-start`. Requires `CODEX_WEB_PASSWORD` in local `.env`. | `cli-tools codex-web` |
 | `cli-tools dvc-clear-cache` | Preview and confirm local DVC cache cleanup for the current workspace. Never clears DVC remote storage. | `cd /path/to/repo && cli-tools dvc-clear-cache` |
 | `cli-tools dvc-push-data` | Review a concise `data/` change summary and changed folders, confirm, then run DVC push and Git metadata commit/push. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && cli-tools dvc-push-data` |
@@ -86,6 +87,19 @@ Use `cli-tools ssh-tunnel --all` to fetch active remote named ports, connect all
 of them with one SSH tunnel, and print `name -> local URL` lines sorted by name.
 While it is running, enter `s` to sync newly added remote ports and reprint the
 full URL list, or `q` to stop the tunnel.
+
+## Codex Add
+
+Open an existing codexapp project folder:
+
+```bash
+cli-tools codex-add /path/to/project
+cli-tools codex-add
+```
+
+When no path is provided, the command prompts for a project folder with
+directory Tab completion starting from `CODEX_ADD_ROOT` in local `.env`, for
+example `CODEX_ADD_ROOT=/path/to/root`.
 
 ## Codex Web
 
