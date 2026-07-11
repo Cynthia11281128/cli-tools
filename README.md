@@ -35,24 +35,46 @@ completion is missing or broken.
 
 ## Commands
 
+### Codex
+
 | Command | Purpose | Typical use |
 |---|---|---|
-| `cli-tools` | List or run toolbox commands with scoped subcommand completion. | `cli-tools list` |
 | `cli-tools codex-add` | Open an existing codexapp project folder. Supports path arguments and interactive directory Tab completion from `CODEX_ADD_ROOT`. | `cli-tools codex-add /path/to/project` |
 | `cli-tools codex-web` | Prompt for a project path and port, then start codexapp through `port-start`. Requires `CODEX_WEB_PASSWORD` in local `.env`. | `cli-tools codex-web` |
+
+### DVC
+
+| Command | Purpose | Typical use |
+|---|---|---|
 | `cli-tools dvc-clear-cache` | Preview and confirm local DVC cache cleanup for the current workspace. Never clears DVC remote storage. | `cd /path/to/repo && cli-tools dvc-clear-cache` |
 | `cli-tools dvc-push-data` | Review a concise `data/` change summary and changed folders, confirm, then run DVC push and Git metadata commit/push. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && cli-tools dvc-push-data` |
 | `cli-tools dvc-pull-data` | Pull latest Git data pointer and DVC data. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && cli-tools dvc-pull-data` |
-| `cli-tools git-quick-push` | Review modified/deleted/untracked files, confirm, then commit and push. Stops on unsafe Git states. | `cd /path/to/repo && cli-tools git-quick-push` |
+
+### Viewer
+
+| Command | Purpose | Typical use |
+|---|---|---|
 | `cli-tools glb-viewer` | Prompt for or accept a `.glb` file, start a lightweight Three.js web viewer, and register it as a named port service. | `cli-tools glb-viewer /path/to/model.glb` |
-| `cli-tools list` | List executable subcommands available in this toolbox. | `cli-tools list` |
-| `cli-tools notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `cli-tools notify-done -- make test` |
 | `cli-tools ply-viewer` | Prompt for or accept a `.ply` file, or load a PLY sequence directory, start a lightweight Three.js web viewer, and register it as a named port service. | `cli-tools ply-viewer --sequence /path/to/optimization_snapshots` |
+
+### Port
+
+| Command | Purpose | Typical use |
+|---|---|---|
 | `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
 | `cli-tools port-list` | List local named port services, or use `--full` for status, PID, log, and command details. Supports `--remote` over SSH with `CLI_TOOLS_SSH_REMOTE` from `.env`. | `cli-tools port-list --full` |
 | `cli-tools port-stop` | Stop one or more managed services by name or port, or every managed service with `--all`. | `cli-tools port-stop viewer 7860` |
 | `cli-tools port-clear-cache` | Clear named port registry and logs when no managed port services are active. | `cli-tools port-clear-cache` |
 | `cli-tools ssh-tunnel` | Open SSH local port forwards for entered ports, or use `--all` to forward every active named remote port. | `cli-tools ssh-tunnel --all` |
+
+### Other
+
+| Command | Purpose | Typical use |
+|---|---|---|
+| `cli-tools` | List or run toolbox commands with scoped subcommand completion. | `cli-tools list` |
+| `cli-tools git-quick-push` | Review modified/deleted/untracked files, confirm, then commit and push. Stops on unsafe Git states. | `cd /path/to/repo && cli-tools git-quick-push` |
+| `cli-tools list` | List executable subcommands available in this toolbox. | `cli-tools list` |
+| `cli-tools notify-done` | Run a command and send a desktop notification when it finishes. Returns the wrapped command's exit code. | `cli-tools notify-done -- make test` |
 
 ## Named Ports
 
