@@ -38,6 +38,7 @@ completion is missing or broken.
 | Command | Purpose | Typical use |
 |---|---|---|
 | `cli-tools` | List or run toolbox commands with scoped subcommand completion. | `cli-tools list` |
+| `cli-tools codex-web` | Prompt for a project path and port, then start codexapp through `port-start`. Requires `CODEX_WEB_PASSWORD` in local `.env`. | `cli-tools codex-web` |
 | `cli-tools dvc-clear-cache` | Preview and confirm local DVC cache cleanup for the current workspace. Never clears DVC remote storage. | `cd /path/to/repo && cli-tools dvc-clear-cache` |
 | `cli-tools dvc-push-data` | Review a concise `data/` change summary and changed folders, confirm, then run DVC push and Git metadata commit/push. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && cli-tools dvc-push-data` |
 | `cli-tools dvc-pull-data` | Pull latest Git data pointer and DVC data. Requires a clean Git/DVC repo with upstream. | `cd /path/to/repo && cli-tools dvc-pull-data` |
@@ -85,6 +86,18 @@ Use `cli-tools ssh-tunnel --all` to fetch active remote named ports, connect all
 of them with one SSH tunnel, and print `name -> local URL` lines sorted by name.
 While it is running, enter `s` to sync newly added remote ports and reprint the
 full URL list, or `q` to stop the tunnel.
+
+## Codex Web
+
+Start codexapp as a named port service:
+
+```bash
+cli-tools codex-web
+```
+
+The command prompts for a project path and port. Press Enter to use
+`/home/xinyuan/GRIP-Layout` and port `5900`. Store the password in local `.env`
+as `CODEX_WEB_PASSWORD`; it is not tracked by Git.
 
 ## GLB Viewer
 

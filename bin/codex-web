@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools codex-web [--path PATH] [--port PORT] [--name NAME]
+  codex-web [--path PATH] [--port PORT] [--name NAME]
+
+Start codexapp through npx and register it as a named port service.
+
+Options:
+  --path PATH  Project path. Default prompt value: /home/xinyuan/GRIP-Layout.
+  --port PORT  Port to use. Default prompt value: 5900.
+  --name NAME  Named port service name. Defaults to codex-web.
+  -h, --help   Show this help.
+
+The password is read from CODEX_WEB_PASSWORD in local .env.
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+strip_matching_quotes() {
+  local value="$1"
+  local length="${#value}"
+
+  if [[ "$length" -ge 2 ]]; then
+    if [[ "${value:0:1}" == '"' && "${value:length-1:1}" == '"' ]]; then
+      value="${value:1:length-2}"
+    elif [[ "${value:0:1}" == "'" && "${value:length-1:1}" == "'" ]]; then
+      value="${value:1:length-2}"
+    fi
+  fi
+
+  printf '%s\n' "$value"
+}
+
+load_env_value() {
+  local env_file="$1"
+  local key="$2"
+  local line value=""
+
+  [[ -f "$env_file" ]] || die "missing .env file: $env_file"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      ""|\#*) continue ;;
+      "$key"=*)
+        value="${line#"$key"=}"
+        ;;
+    esac
+  done <"$env_file"
+
+  strip_matching_quotes "$value"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+
+default_path="/home/xinyuan/GRIP-Layout"
+default_port="5900"
+project_path=""
+port=""
+name="codex-web"
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --path)
+      [[ "$#" -ge 2 ]] || die "missing value for --path"
+      project_path="$2"
+      shift 2
+      ;;
+    --path=*)
+      project_path="${1#--path=}"
+      shift
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      shift
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+require_cmd bash
+require_cmd npx
+
+if [[ -z "$project_path" ]]; then
+  project_path="$default_path"
+fi
+if [[ -z "$port" ]]; then
+  port="$default_port"
+fi
+
+printf 'Project path [%s]: ' "$project_path" >&2
+IFS= read -r project_input || die "failed to read project path"
+if [[ -n "$project_input" ]]; then
+  project_path="$project_input"
+fi
+
+printf 'Port [%s]: ' "$port" >&2
+IFS= read -r port_input || die "failed to read port"
+if [[ -n "$port_input" ]]; then
+  port="$port_input"
+fi
+
+expanded_project_path="$(expand_path "$project_path")"
+[[ -d "$expanded_project_path" ]] || die "project path is not a directory: $expanded_project_path"
+project_path="$(CDPATH= cd -- "$expanded_project_path" && pwd)" ||
+  die "failed to resolve project path: $expanded_project_path"
+
+validate_port "$port"
+
+codex_web_password="$(load_env_value "$repo_dir/.env" "CODEX_WEB_PASSWORD")"
+[[ -n "$codex_web_password" ]] || die "missing CODEX_WEB_PASSWORD in $repo_dir/.env"
+export CODEX_WEB_PASSWORD="$codex_web_password"
+
+"$bin_dir/port-start" "$name" "$port" -- \
+  bash -lc 'exec npx --yes --cache=/tmp/tmp_data/npm-cache codexapp "$1" --no-open --no-tunnel --port "$2" --password "$CODEX_WEB_PASSWORD" --sandbox-mode danger-full-access --approval-policy never' \
+  bash "$project_path" "$port"
+
+printf 'Codex web URL: http://127.0.0.1:%s/\n' "$port"
+printf 'Project path: %s\n' "$project_path"
+printf 'Remote access: run cli-tools ssh-tunnel --all from your local machine.\n'
