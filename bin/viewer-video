@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools viewer-video [VIDEO_PATH] [--port PORT] [--name NAME] [--host HOST] [--python PYTHON]
+  viewer-video [VIDEO_PATH] [--port PORT] [--name NAME] [--host HOST] [--python PYTHON]
+
+Start a lightweight web viewer for a single .mp4 or .mov video file.
+If VIDEO_PATH is omitted, the command prompts for the path interactively with
+Tab completion.
+
+Options:
+  --port PORT     Port to use. Defaults to an automatically selected free port.
+  --name NAME     Named port service name. Defaults to video-view-<port>.
+  --host HOST     Bind host for the web server. Defaults to 127.0.0.1.
+  --python PYTHON Python interpreter used for the server. Defaults to python3.
+                  Use an interpreter with cv2 for metadata and frame previews.
+  -h, --help      Show this help.
+
+Examples:
+  cli-tools viewer-video ~/videos/clip.mp4
+  cli-tools viewer-video ~/videos/clip.MOV --name clip-video
+  cli-tools viewer-video ~/videos/clip.MOV --python /tmp/tmp_data/miniconda3/envs/vggt/bin/python
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+find_free_port() {
+  local host="$1"
+
+  python3 - "$host" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind((host, 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+is_supported_video_path() {
+  local path="${1,,}"
+
+  case "$path" in
+    *.mp4|*.mov)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+read_video_path() {
+  local value
+
+  if [[ -t 0 ]]; then
+    IFS= read -e -r -p 'Video file: ' value ||
+      die "failed to read video path"
+  else
+    printf 'Video file: ' >&2
+    IFS= read -r value || die "failed to read video path"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+validate_python() {
+  local python_bin="$1"
+
+  if [[ "$python_bin" == */* ]]; then
+    [[ -x "$python_bin" && -f "$python_bin" ]] ||
+      die "python interpreter is not executable: $python_bin"
+  else
+    command -v "$python_bin" >/dev/null 2>&1 ||
+      die "missing python interpreter: $python_bin"
+  fi
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+server_path="$repo_dir/lib/video-viewer/server.py"
+
+host="127.0.0.1"
+port=""
+name=""
+python_bin="python3"
+video_input=""
+prompted_for_video_path="no"
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      shift
+      ;;
+    --host)
+      [[ "$#" -ge 2 ]] || die "missing value for --host"
+      host="$2"
+      shift 2
+      ;;
+    --host=*)
+      host="${1#--host=}"
+      shift
+      ;;
+    --python)
+      [[ "$#" -ge 2 ]] || die "missing value for --python"
+      python_bin="$2"
+      shift 2
+      ;;
+    --python=*)
+      python_bin="${1#--python=}"
+      shift
+      ;;
+    --)
+      shift
+      [[ "$#" -le 1 ]] || die "expected at most one video file"
+      if [[ "$#" -eq 1 ]]; then
+        video_input="$1"
+      fi
+      shift "$#"
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      [[ -z "$video_input" ]] || die "expected at most one video file"
+      video_input="$1"
+      shift
+      ;;
+  esac
+done
+
+require_cmd python3
+require_cmd realpath
+validate_python "$python_bin"
+
+[[ -f "$server_path" ]] || die "missing video viewer server: $server_path"
+
+if [[ -z "$video_input" ]]; then
+  video_input="$(read_video_path)"
+  prompted_for_video_path="yes"
+fi
+
+[[ -n "$video_input" ]] || die "video file is required"
+
+expanded_video_path="$(expand_path "$video_input")"
+[[ -f "$expanded_video_path" ]] || die "video file does not exist: $expanded_video_path"
+is_supported_video_path "$expanded_video_path" ||
+  die "unsupported video format: $expanded_video_path; expected .mp4 or .mov"
+
+video_path="$(realpath -- "$expanded_video_path")" ||
+  die "failed to resolve video file: $expanded_video_path"
+
+if [[ -n "$port" ]]; then
+  validate_port "$port"
+else
+  port="$(find_free_port "$host")" || die "failed to find a free port for host: $host"
+fi
+
+if [[ -z "$name" && "$prompted_for_video_path" == "yes" && -t 0 ]]; then
+  default_name="video-view-$port"
+  printf 'Service name [%s]: ' "$default_name" >&2
+  IFS= read -r name_input || die "failed to read service name"
+  if [[ -n "$name_input" ]]; then
+    name="$name_input"
+  fi
+fi
+
+if [[ -z "$name" ]]; then
+  name="video-view-$port"
+fi
+
+"$bin_dir/port-start" "$name" "$port" -- \
+  "$python_bin" "$server_path" --video "$video_path" --port "$port" --host "$host" --name "$name"
+
+url_host="$host"
+if [[ "$url_host" == "0.0.0.0" || "$url_host" == "::" ]]; then
+  url_host="127.0.0.1"
+fi
+
+printf 'Viewer URL: http://%s:%s/\n' "$url_host" "$port"
+printf 'Video file: %s\n' "$video_path"
+printf 'Remote access: run cli-tools ssh-tunnel --all from your local machine.\n'

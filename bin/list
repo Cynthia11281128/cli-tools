@@ -56,7 +56,11 @@ bin_dir="$(dirname -- "$script_path")"
 commands=()
 while IFS= read -r source_cmd; do
   name="$(basename -- "$source_cmd")"
-  [[ "$name" == "cli-tools" ]] && continue
+  case "$name" in
+    cli-tools|ply-viewer|glb-viewer|img-viewer|video-viewer)
+      continue
+      ;;
+  esac
   commands+=("$name")
 done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
 

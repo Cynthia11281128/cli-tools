@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Video Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101114;
+        --panel: #181a20;
+        --panel-2: #20232b;
+        --line: #333844;
+        --text: #f3f5f8;
+        --muted: #a4adbb;
+        --accent: #75c7b7;
+        --danger: #ff8a8a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        height: 32px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-2);
+        color: var(--text);
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: rgba(117, 199, 183, 0.7);
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+
+      .app {
+        display: grid;
+        width: 100vw;
+        height: 100vh;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .topbar {
+        display: grid;
+        min-height: 64px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 16px;
+        align-items: center;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(16, 17, 20, 0.96);
+      }
+
+      .title {
+        overflow: hidden;
+        font-size: 14px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .meta {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .path {
+        max-width: 44vw;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: right;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .top-actions {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .main {
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr) auto;
+      }
+
+      .stage {
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        place-items: center;
+        padding: 14px;
+        background: #0d0e11;
+      }
+
+      video {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+        background: #000;
+      }
+
+      video[hidden] {
+        display: none;
+      }
+
+      .stream-image {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+
+      .stream-image[hidden] {
+        display: none;
+      }
+
+      .alert {
+        position: absolute;
+        left: 14px;
+        bottom: 14px;
+        max-width: min(620px, calc(100vw - 28px));
+        padding: 9px 10px;
+        border: 1px solid rgba(255, 138, 138, 0.42);
+        border-radius: 6px;
+        background: rgba(48, 18, 22, 0.9);
+        color: var(--danger);
+        font-size: 12px;
+      }
+
+      .video-wrap {
+        position: relative;
+        display: grid;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        place-items: center;
+      }
+
+      .frames {
+        display: grid;
+        min-height: 58px;
+        grid-template-rows: auto;
+        border-top: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .frames[hidden],
+      .alert[hidden],
+      .preview-button[hidden] {
+        display: none;
+      }
+
+      .framebar {
+        display: grid;
+        min-height: 48px;
+        grid-template-columns: auto auto auto minmax(160px, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .preview-button {
+        min-width: 124px;
+      }
+
+      .frame-index {
+        min-width: 120px;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: right;
+      }
+
+      @media (max-width: 760px) {
+        .topbar {
+          grid-template-columns: minmax(0, 1fr);
+          gap: 4px;
+        }
+
+        .top-actions {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .path {
+          max-width: 100%;
+          text-align: left;
+        }
+
+        .framebar {
+          grid-template-columns: auto auto auto minmax(0, 1fr);
+        }
+
+        .frame-index {
+          grid-column: 1 / -1;
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div>
+          <div id="title" class="title">Video Viewer</div>
+          <div id="meta" class="meta"></div>
+        </div>
+        <div class="top-actions">
+          <button id="toggle-preview" class="preview-button" title="Toggle frame preview" hidden>
+            Frame preview
+          </button>
+          <div id="path" class="path"></div>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="stage">
+          <div class="video-wrap">
+            <video id="video" controls preload="metadata" playsinline></video>
+            <img id="stream-image" class="stream-image" alt="" hidden />
+            <div id="video-error" class="alert" hidden>
+              Browser cannot decode this video codec. OpenCV frame playback is active.
+            </div>
+          </div>
+        </section>
+
+        <section id="frames" class="frames" hidden>
+          <div class="framebar">
+            <button id="play-preview" title="Play OpenCV frame stream">Play</button>
+            <button id="prev-frame" title="Previous frame">‹</button>
+            <button id="next-frame" title="Next frame">›</button>
+            <input id="frame-slider" type="range" min="0" max="0" value="0" />
+            <div id="frame-index" class="frame-index"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const titleEl = document.getElementById("title");
+      const metaEl = document.getElementById("meta");
+      const pathEl = document.getElementById("path");
+      const videoEl = document.getElementById("video");
+      const streamImageEl = document.getElementById("stream-image");
+      const errorEl = document.getElementById("video-error");
+      const framesEl = document.getElementById("frames");
+      const togglePreviewEl = document.getElementById("toggle-preview");
+      const playPreviewEl = document.getElementById("play-preview");
+      const prevFrameEl = document.getElementById("prev-frame");
+      const nextFrameEl = document.getElementById("next-frame");
+      const frameSliderEl = document.getElementById("frame-slider");
+      const frameIndexEl = document.getElementById("frame-index");
+
+      let frameCount = 0;
+      let sourceFps = 0;
+      let previewFps = 30;
+      let frameStride = 1;
+      let previewEnabled = false;
+      let previewLoaded = false;
+      let previewPlaying = false;
+      let frameTimer = 0;
+      let playTimer = 0;
+
+      function formatBytes(size) {
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = Number(size);
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      function formatDuration(seconds) {
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return "";
+        }
+        const whole = Math.round(seconds);
+        const minutes = Math.floor(whole / 60);
+        const rest = whole % 60;
+        return `${minutes}:${String(rest).padStart(2, "0")}`;
+      }
+
+      function metadataText(meta) {
+        const parts = [formatBytes(meta.video.size), meta.video.type];
+        const cv = meta.opencv || {};
+        if (cv.can_open) {
+          if (cv.width && cv.height) {
+            parts.push(`${cv.width}x${cv.height}`);
+          }
+          if (cv.fps) {
+            parts.push(`${Number(cv.fps).toFixed(2)} fps`);
+          }
+          if (cv.frame_count) {
+            parts.push(`${cv.frame_count} frames`);
+          }
+          const duration = formatDuration(cv.duration_seconds);
+          if (duration) {
+            parts.push(duration);
+          }
+          if (cv.fourcc) {
+            parts.push(cv.fourcc);
+          }
+        }
+        return parts.join(" · ");
+      }
+
+      function setFrame(index) {
+        if (!previewEnabled || frameCount <= 0) {
+          return;
+        }
+        const clamped = Math.max(0, Math.min(Number(index), frameCount - 1));
+        frameSliderEl.value = String(clamped);
+        frameIndexEl.textContent = `${clamped + 1} / ${frameCount}`;
+        window.clearTimeout(frameTimer);
+        frameTimer = window.setTimeout(() => {
+          streamImageEl.src = `/frame.jpg?index=${clamped}&max_width=1280&t=${Date.now()}`;
+          previewLoaded = true;
+        }, 80);
+      }
+
+      function showFramePreview() {
+        if (!previewEnabled) {
+          return;
+        }
+        stopNativeVideo();
+        framesEl.hidden = false;
+        streamImageEl.hidden = false;
+        if (!previewLoaded) {
+          setFrame(Number(frameSliderEl.value));
+        }
+      }
+
+      function stopNativeVideo() {
+        videoEl.pause();
+        videoEl.hidden = true;
+      }
+
+      function stopPreviewPlayback() {
+        if (!previewPlaying) {
+          return;
+        }
+        previewPlaying = false;
+        playPreviewEl.textContent = "Play";
+        window.clearInterval(playTimer);
+        streamImageEl.src = "";
+        setFrame(Number(frameSliderEl.value));
+      }
+
+      function startPreviewPlayback() {
+        if (!previewEnabled) {
+          return;
+        }
+        showFramePreview();
+        previewPlaying = true;
+        playPreviewEl.textContent = "Pause";
+        const start = Number(frameSliderEl.value);
+        streamImageEl.src = `/stream.mjpg?start=${start}&fps=${previewFps}&all_frames=1&max_width=1280&t=${Date.now()}`;
+        window.clearInterval(playTimer);
+        playTimer = window.setInterval(() => {
+          const next = Math.min(Number(frameSliderEl.value) + frameStride, frameCount - 1);
+          frameSliderEl.value = String(next);
+          frameIndexEl.textContent = `${next + 1} / ${frameCount}`;
+          if (next >= frameCount - 1) {
+            stopPreviewPlayback();
+          }
+        }, 1000 / previewFps);
+      }
+
+      function togglePreviewPlayback() {
+        if (previewPlaying) {
+          stopPreviewPlayback();
+        } else {
+          startPreviewPlayback();
+        }
+      }
+
+      function configureFramePreview(meta) {
+        const cv = meta.opencv || {};
+        previewEnabled = Boolean(cv.can_open && cv.frame_count > 0);
+        if (!previewEnabled) {
+          framesEl.hidden = true;
+          togglePreviewEl.hidden = true;
+          return;
+        }
+
+        togglePreviewEl.hidden = false;
+        frameCount = Number(cv.frame_count);
+        sourceFps = Number(cv.fps || 0);
+        previewFps = sourceFps > 0 ? Math.min(sourceFps, 60) : 30;
+        frameStride = 1;
+        frameSliderEl.max = String(frameCount - 1);
+        frameSliderEl.value = "0";
+        frameIndexEl.textContent = `1 / ${frameCount}`;
+
+        togglePreviewEl.addEventListener("click", () => {
+          if (framesEl.hidden) {
+            showFramePreview();
+          } else {
+            framesEl.hidden = true;
+          }
+        });
+        playPreviewEl.addEventListener("click", togglePreviewPlayback);
+        prevFrameEl.addEventListener("click", () => setFrame(Number(frameSliderEl.value) - 1));
+        nextFrameEl.addEventListener("click", () => setFrame(Number(frameSliderEl.value) + 1));
+        frameSliderEl.addEventListener("input", () => {
+          const index = Number(frameSliderEl.value);
+          if (previewPlaying) {
+            stopPreviewPlayback();
+          }
+          setFrame(index);
+        });
+      }
+
+      function shouldPreferPreview(meta) {
+        const cv = meta.opencv || {};
+        const fourcc = String(cv.fourcc || "").toLowerCase();
+        return Boolean(cv.can_open && (fourcc.includes("hevc") || fourcc.includes("h265")));
+      }
+
+      async function main() {
+        const response = await fetch("/meta.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`metadata request failed: ${response.status}`);
+        }
+        const meta = await response.json();
+
+        document.title = meta.video.name;
+        titleEl.textContent = meta.video.name;
+        metaEl.textContent = metadataText(meta);
+        pathEl.textContent = meta.path;
+        pathEl.title = meta.path;
+
+        const source = document.createElement("source");
+        source.src = meta.video.url;
+        source.type = meta.video.type;
+        videoEl.appendChild(source);
+        videoEl.load();
+
+        configureFramePreview(meta);
+
+        videoEl.addEventListener("error", () => {
+          errorEl.hidden = false;
+          startPreviewPlayback();
+        });
+
+        if (shouldPreferPreview(meta)) {
+          errorEl.hidden = false;
+          startPreviewPlayback();
+        }
+      }
+
+      main().catch((error) => {
+        titleEl.textContent = "Video Viewer";
+        metaEl.textContent = String(error);
+      });
+    </script>
+  </body>
+</html>

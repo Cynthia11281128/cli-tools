@@ -20,12 +20,6 @@ _cli_tools_resolve_path() {
 _cli_tools_candidates() {
   local include_aliases="${1:-yes}"
 
-  if [[ "$include_aliases" == "yes" ]]; then
-    printf '%s\n' help list
-  else
-    printf '%s\n' help
-  fi
-
   local completion_path repo_dir bin_dir source_cmd name
   completion_path="$(_cli_tools_resolve_path "${BASH_SOURCE[0]}")" || return 0
   repo_dir="$(CDPATH= cd -- "$(dirname -- "$completion_path")/.." 2>/dev/null && pwd)" || return 0
@@ -33,9 +27,19 @@ _cli_tools_candidates() {
 
   [[ -d "$bin_dir" ]] || return 0
 
+  if [[ "$include_aliases" == "yes" ]]; then
+    printf '%s\n' help list
+  else
+    printf '%s\n' help
+  fi
+
   while IFS= read -r source_cmd; do
     name="$(basename -- "$source_cmd")"
-    [[ "$name" == "cli-tools" ]] && continue
+    case "$name" in
+      cli-tools|ply-viewer|glb-viewer|img-viewer|video-viewer)
+        continue
+        ;;
+    esac
     printf '%s\n' "$name"
   done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
 }
@@ -153,7 +157,7 @@ _cli_tools_completion() {
     return 0
   fi
 
-  if [[ "$command_name" == "img-viewer" && "${COMP_CWORD:-0}" -eq 2 ]]; then
+  if [[ "$command_name" == "viewer-img" && "${COMP_CWORD:-0}" -eq 2 ]]; then
     _cli_tools_complete_images_and_directories "$cur"
     return 0
   fi

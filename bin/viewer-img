@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools viewer-img [IMAGE_OR_DIR] [--port PORT] [--name NAME] [--host HOST]
+  viewer-img [IMAGE_OR_DIR] [--port PORT] [--name NAME] [--host HOST]
+
+Start a lightweight web viewer for a single image file or a folder of images.
+If IMAGE_OR_DIR is omitted, the command prompts for the path interactively with
+Tab completion.
+
+Supported image formats: jpg, jpeg, png, webp, gif, svg.
+
+Options:
+  --port PORT   Port to use. Defaults to an automatically selected free port.
+  --name NAME   Named port service name. Defaults to img-view-<port>.
+  --host HOST   Bind host for the web server. Defaults to 127.0.0.1.
+  -h, --help    Show this help.
+
+Examples:
+  cli-tools viewer-img
+  cli-tools viewer-img ~/outputs/frame.png
+  cli-tools viewer-img ~/outputs/images --port 8765 --name my-images
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+find_free_port() {
+  local host="$1"
+
+  python3 - "$host" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind((host, 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+is_supported_image_path() {
+  local path="${1,,}"
+
+  case "$path" in
+    *.jpg|*.jpeg|*.png|*.webp|*.gif|*.svg)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+directory_has_supported_images() {
+  local dir="$1"
+  local path
+
+  while IFS= read -r -d '' path; do
+    if is_supported_image_path "$path"; then
+      return 0
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f -print0)
+
+  return 1
+}
+
+read_image_path() {
+  local value
+
+  if [[ -t 0 ]]; then
+    IFS= read -e -r -p 'Image file or folder: ' value ||
+      die "failed to read image path"
+  else
+    printf 'Image file or folder: ' >&2
+    IFS= read -r value || die "failed to read image path"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+server_path="$repo_dir/lib/img-viewer/server.py"
+
+host="127.0.0.1"
+port=""
+name=""
+image_input=""
+prompted_for_image_path="no"
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      shift
+      ;;
+    --host)
+      [[ "$#" -ge 2 ]] || die "missing value for --host"
+      host="$2"
+      shift 2
+      ;;
+    --host=*)
+      host="${1#--host=}"
+      shift
+      ;;
+    --)
+      shift
+      [[ "$#" -le 1 ]] || die "expected at most one image file or folder"
+      if [[ "$#" -eq 1 ]]; then
+        image_input="$1"
+      fi
+      shift "$#"
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      [[ -z "$image_input" ]] || die "expected at most one image file or folder"
+      image_input="$1"
+      shift
+      ;;
+  esac
+done
+
+require_cmd python3
+require_cmd realpath
+require_cmd find
+
+[[ -f "$server_path" ]] || die "missing image viewer server: $server_path"
+
+if [[ -z "$image_input" ]]; then
+  image_input="$(read_image_path)"
+  prompted_for_image_path="yes"
+fi
+
+[[ -n "$image_input" ]] || die "image file or folder is required"
+
+expanded_image_path="$(expand_path "$image_input")"
+image_path=""
+folder_path=""
+
+if [[ -f "$expanded_image_path" ]]; then
+  is_supported_image_path "$expanded_image_path" ||
+    die "unsupported image format: $expanded_image_path"
+  image_path="$(realpath -- "$expanded_image_path")" ||
+    die "failed to resolve image file: $expanded_image_path"
+elif [[ -d "$expanded_image_path" ]]; then
+  directory_has_supported_images "$expanded_image_path" ||
+    die "folder has no supported images: $expanded_image_path"
+  folder_path="$(realpath -- "$expanded_image_path")" ||
+    die "failed to resolve image folder: $expanded_image_path"
+else
+  die "image file or folder does not exist: $expanded_image_path"
+fi
+
+if [[ -n "$port" ]]; then
+  validate_port "$port"
+else
+  port="$(find_free_port "$host")" || die "failed to find a free port for host: $host"
+fi
+
+if [[ -z "$name" && "$prompted_for_image_path" == "yes" && -t 0 ]]; then
+  default_name="img-view-$port"
+  printf 'Service name [%s]: ' "$default_name" >&2
+  IFS= read -r name_input || die "failed to read service name"
+  if [[ -n "$name_input" ]]; then
+    name="$name_input"
+  fi
+fi
+
+if [[ -z "$name" ]]; then
+  name="img-view-$port"
+fi
+
+server_args=(python3 "$server_path" --port "$port" --host "$host" --name "$name")
+if [[ -n "$folder_path" ]]; then
+  server_args+=(--folder "$folder_path")
+else
+  server_args+=(--image "$image_path")
+fi
+
+"$bin_dir/port-start" "$name" "$port" -- "${server_args[@]}"
+
+url_host="$host"
+if [[ "$url_host" == "0.0.0.0" || "$url_host" == "::" ]]; then
+  url_host="127.0.0.1"
+fi
+
+printf 'Viewer URL: http://%s:%s/\n' "$url_host" "$port"
+if [[ -n "$folder_path" ]]; then
+  printf 'Image folder: %s\n' "$folder_path"
+else
+  printf 'Image file: %s\n' "$image_path"
+fi
+printf 'Remote access: run cli-tools ssh-tunnel --all from your local machine.\n'

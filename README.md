@@ -46,6 +46,7 @@ Command-specific requirements:
 - `ssh` for remote port listing and tunnels
 - `npx` for Codex commands
 - `python3` for GLB, image, and PLY viewers
+- `python3` for video viewing; optional `cv2` for video metadata and frame previews
 - `notify-send` for desktop notifications
 
 ## Install
@@ -122,9 +123,10 @@ Available keys:
 
 | Command | Purpose | Typical use |
 |---|---|---|
-| `cli-tools glb-viewer` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools glb-viewer /path/to/model.glb` |
-| `cli-tools img-viewer` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools img-viewer /path/to/images` |
-| `cli-tools ply-viewer` | Start a lightweight Three.js viewer for a `.ply` file or PLY sequence directory and register it as a named port service. | `cli-tools ply-viewer --sequence /path/to/optimization_snapshots` |
+| `cli-tools viewer-ply` | Start a lightweight Three.js viewer for a `.ply` file or PLY sequence directory and register it as a named port service. | `cli-tools viewer-ply --sequence /path/to/optimization_snapshots` |
+| `cli-tools viewer-glb` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools viewer-glb /path/to/model.glb` |
+| `cli-tools viewer-img` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools viewer-img /path/to/images` |
+| `cli-tools viewer-video` | Start a lightweight web viewer for a `.mp4` or `.mov` video and register it as a named port service. | `cli-tools viewer-video /path/to/video.MOV` |
 
 ### Port
 
@@ -218,27 +220,47 @@ the password in local `.env` as `CODEX_WEB_PASSWORD`; it is not tracked by Git.
 
 ## Viewers
 
+Start a browser video viewer for MP4 or MOV files:
+
+```bash
+cli-tools viewer-video /path/to/video.MOV
+```
+
+Pass a Python interpreter with OpenCV installed to show video metadata and
+enable frame preview fallback for codecs the browser cannot decode directly:
+
+```bash
+cli-tools viewer-video /home/xinyuan/VGGT-Long/VGGT-Long-Customized-Dataset/RawVideo/IMG_4642-stairs-wide-60hz.MOV \
+  --name stairs-video \
+  --python /tmp/tmp_data/miniconda3/envs/vggt/bin/python
+```
+
+For HEVC MOV files, browser playback may be unavailable on some systems; the
+viewer automatically exposes OpenCV frame playback when `cv2` is available.
+The fallback requests every source frame by default, so high-fps HEVC videos can
+use substantial CPU and network bandwidth.
+
 Start a single-file binary glTF viewer on the machine where the file lives:
 
 ```bash
-cli-tools glb-viewer /path/to/model.glb
-cli-tools glb-viewer /path/to/model.glb --port 8765 --name scene-view
+cli-tools viewer-glb /path/to/model.glb
+cli-tools viewer-glb /path/to/model.glb --port 8765 --name scene-view
 ```
 
 Start an ordinary mesh or point-cloud PLY viewer:
 
 ```bash
-cli-tools ply-viewer /path/to/model.ply
-cli-tools ply-viewer --sequence /path/to/optimization_snapshots
-cli-tools ply-viewer /path/to/model.ply --port 8765 --name scene-view
+cli-tools viewer-ply /path/to/model.ply
+cli-tools viewer-ply --sequence /path/to/optimization_snapshots
+cli-tools viewer-ply /path/to/model.ply --port 8765 --name scene-view
 ```
 
 Start a single-image or image-folder viewer:
 
 ```bash
-cli-tools img-viewer /path/to/image.png
-cli-tools img-viewer /path/to/images
-cli-tools img-viewer /path/to/images --port 8765 --name image-review
+cli-tools viewer-img /path/to/image.png
+cli-tools viewer-img /path/to/images
+cli-tools viewer-img /path/to/images --port 8765 --name image-review
 ```
 
 Folder mode reads supported images from the top-level directory, shows a left
