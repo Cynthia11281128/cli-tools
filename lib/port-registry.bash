@@ -334,7 +334,7 @@ port_registry_print_entries() {
     if (( ${#port} > port_width )); then
       port_width="${#port}"
     fi
-  done <"$PORT_REGISTRY"
+  done < <(sort -f -t $'\t' -k1,1 -k2,2n -- "$PORT_REGISTRY")
 
   if [[ "$mode" == "full" ]]; then
     printf '%-*s %-*s %-10s %-8s %-25s %s\n' \
@@ -365,7 +365,7 @@ port_registry_print_entries() {
       printf '%b%-*s%b ' "$blue" "$name_width" "$name" "$reset"
       printf '%b%-*s%b %s\n' "$blue" "$port_width" "$port" "$reset" "$start_time"
     fi
-  done <"$PORT_REGISTRY"
+  done < <(sort -f -t $'\t' -k1,1 -k2,2n -- "$PORT_REGISTRY")
 }
 
 port_parse_registry_line() {

@@ -175,7 +175,7 @@ cli-tools port-clear-cache
 `port-start` requires `--` before the command it should run. Names may contain
 only letters, numbers, `.`, `_`, and `-`. `port-stop` only stops services in the
 cli-tools registry; it does not kill arbitrary unregistered processes by port
-number.
+number. `port-list` output is sorted by service name.
 
 Remote port discovery uses `CLI_TOOLS_SSH_REMOTE` from `.env`:
 
@@ -191,8 +191,8 @@ one SSH connection, and print `name -> local URL` lines sorted by name:
 cli-tools ssh-tunnel --all
 ```
 
-While it is running, enter `s` to sync newly added remote ports and reprint the
-full URL list, or `q` to stop the tunnel.
+While it is running, enter `s` to refresh remote ports and reprint the full URL
+list, or `q` to stop the tunnel.
 
 ## Codex Tools
 
