@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Image Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101114;
+        --panel: #181a20;
+        --panel-2: #20232b;
+        --line: #333844;
+        --text: #f3f5f8;
+        --muted: #a4adbb;
+        --accent: #75c7b7;
+        --danger: #ff8a8a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      .app {
+        display: grid;
+        grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .app.single {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .sidebar {
+        display: flex;
+        min-width: 0;
+        min-height: 0;
+        flex-direction: column;
+        border-right: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .single .sidebar {
+        display: none;
+      }
+
+      .sidebar-header {
+        display: flex;
+        min-height: 58px;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .title {
+        overflow: hidden;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 650;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .count {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .image-list {
+        min-height: 0;
+        overflow: auto;
+        padding: 6px;
+      }
+
+      .image-item {
+        display: block;
+        width: 100%;
+        min-height: 34px;
+        margin: 0;
+        padding: 7px 8px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+        text-align: left;
+      }
+
+      .image-item:hover {
+        background: var(--panel-2);
+        color: var(--text);
+      }
+
+      .image-item.active {
+        background: rgba(117, 199, 183, 0.16);
+        color: var(--text);
+        outline: 1px solid rgba(117, 199, 183, 0.42);
+      }
+
+      .main {
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .topbar {
+        display: flex;
+        min-height: 58px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(16, 17, 20, 0.96);
+      }
+
+      .status {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 620;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .path {
+        min-width: 160px;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: right;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .stage {
+        position: relative;
+        min-width: 0;
+        min-height: 0;
+        background:
+          linear-gradient(45deg, #15171c 25%, transparent 25%),
+          linear-gradient(-45deg, #15171c 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #15171c 75%),
+          linear-gradient(-45deg, transparent 75%, #15171c 75%);
+        background-color: #0d0e11;
+        background-position:
+          0 0,
+          0 10px,
+          10px -10px,
+          -10px 0;
+        background-size: 20px 20px;
+      }
+
+      .image {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      .error {
+        display: none;
+        padding: 24px;
+        color: var(--danger);
+        font-size: 14px;
+      }
+
+      .failed .stage {
+        display: none;
+      }
+
+      .failed .error {
+        display: block;
+      }
+
+      @media (max-width: 760px) {
+        .app {
+          grid-template-columns: minmax(150px, 38vw) minmax(0, 1fr);
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .path {
+          width: 100%;
+          min-width: 0;
+          text-align: left;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app" class="app">
+      <aside class="sidebar" aria-label="Images">
+        <div class="sidebar-header">
+          <div id="viewerTitle" class="title">Image Viewer</div>
+          <div id="imageCount" class="count"></div>
+        </div>
+        <div id="imageList" class="image-list"></div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div id="status" class="status">Loading...</div>
+          <div id="sourcePath" class="path"></div>
+        </header>
+        <section class="stage" aria-label="Image preview">
+          <img id="image" class="image" alt="" />
+        </section>
+        <div id="error" class="error"></div>
+      </main>
+    </div>
+
+    <script>
+      const app = document.getElementById("app");
+      const viewerTitle = document.getElementById("viewerTitle");
+      const imageCount = document.getElementById("imageCount");
+      const imageList = document.getElementById("imageList");
+      const status = document.getElementById("status");
+      const sourcePath = document.getElementById("sourcePath");
+      const image = document.getElementById("image");
+      const error = document.getElementById("error");
+
+      let images = [];
+      let currentIndex = 0;
+      let mode = "single";
+
+      function setError(message) {
+        app.classList.add("failed");
+        error.textContent = message;
+        status.textContent = "Failed to load image viewer";
+      }
+
+      function setCurrent(index) {
+        if (!images.length) {
+          return;
+        }
+
+        currentIndex = (index + images.length) % images.length;
+        const item = images[currentIndex];
+        image.src = item.url;
+        image.alt = item.name;
+
+        if (mode === "folder") {
+          status.textContent = `${currentIndex + 1} / ${images.length}  ${item.name}`;
+          for (const button of imageList.querySelectorAll(".image-item")) {
+            button.classList.toggle("active", Number(button.dataset.index) === currentIndex);
+          }
+          const active = imageList.querySelector(".image-item.active");
+          if (active) {
+            active.scrollIntoView({ block: "nearest" });
+          }
+        } else {
+          status.textContent = item.name;
+        }
+      }
+
+      function renderList() {
+        imageList.textContent = "";
+        for (const [index, item] of images.entries()) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "image-item";
+          button.dataset.index = String(index);
+          button.textContent = item.name;
+          button.addEventListener("click", () => setCurrent(index));
+          imageList.appendChild(button);
+        }
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setCurrent(currentIndex - 1);
+        } else if (event.key === "ArrowRight") {
+          event.preventDefault();
+          setCurrent(currentIndex + 1);
+        }
+      });
+
+      image.addEventListener("error", () => {
+        setError(`Could not display image: ${images[currentIndex]?.name || "unknown"}`);
+      });
+
+      async function main() {
+        const response = await fetch("/meta.json", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const meta = await response.json();
+        mode = meta.mode;
+        document.title = `${meta.name || "Image Viewer"} - Image Viewer`;
+        viewerTitle.textContent = meta.name || "Image Viewer";
+        sourcePath.textContent = meta.path || "";
+
+        if (mode === "folder") {
+          images = meta.images || [];
+          imageCount.textContent = `${images.length} images`;
+          renderList();
+        } else {
+          app.classList.add("single");
+          images = meta.image ? [meta.image] : [];
+          imageCount.textContent = "";
+        }
+
+        if (!images.length) {
+          throw new Error("No images found");
+        }
+
+        setCurrent(0);
+      }
+
+      main().catch((err) => {
+        setError(err && err.message ? err.message : "Unknown error");
+      });
+    </script>
+  </body>
+</html>

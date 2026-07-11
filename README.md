@@ -45,7 +45,7 @@ Command-specific requirements:
 - `dvc` for DVC commands
 - `ssh` for remote port listing and tunnels
 - `npx` for Codex commands
-- `python3` for GLB and PLY viewers
+- `python3` for GLB, image, and PLY viewers
 - `notify-send` for desktop notifications
 
 ## Install
@@ -123,6 +123,7 @@ Available keys:
 | Command | Purpose | Typical use |
 |---|---|---|
 | `cli-tools glb-viewer` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools glb-viewer /path/to/model.glb` |
+| `cli-tools img-viewer` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools img-viewer /path/to/images` |
 | `cli-tools ply-viewer` | Start a lightweight Three.js viewer for a `.ply` file or PLY sequence directory and register it as a named port service. | `cli-tools ply-viewer --sequence /path/to/optimization_snapshots` |
 
 ### Port
@@ -232,7 +233,19 @@ cli-tools ply-viewer --sequence /path/to/optimization_snapshots
 cli-tools ply-viewer /path/to/model.ply --port 8765 --name scene-view
 ```
 
-Both viewers register themselves through `port-start`, print the local URL, and
+Start a single-image or image-folder viewer:
+
+```bash
+cli-tools img-viewer /path/to/image.png
+cli-tools img-viewer /path/to/images
+cli-tools img-viewer /path/to/images --port 8765 --name image-review
+```
+
+Folder mode reads supported images from the top-level directory, shows a left
+side list for direct selection, and supports left/right arrow key navigation.
+Supported formats are `jpg`, `jpeg`, `png`, `webp`, `gif`, and `svg`.
+
+All viewers register themselves through `port-start`, print the local URL, and
 show the service name in the browser tab and viewer title. For remote servers,
 start the viewer on the server first, then run this locally:
 

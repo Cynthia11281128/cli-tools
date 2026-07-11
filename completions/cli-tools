@@ -95,6 +95,29 @@ _cli_tools_complete_directories() {
   compopt -o filenames 2>/dev/null || true
 }
 
+_cli_tools_complete_images_and_directories() {
+  local cur="$1"
+  local candidate lower
+  local -a matches=()
+
+  while IFS= read -r candidate; do
+    if [[ -d "$candidate" ]]; then
+      matches+=("${candidate%/}/")
+      continue
+    fi
+
+    lower="${candidate,,}"
+    case "$lower" in
+      *.jpg|*.jpeg|*.png|*.webp|*.gif|*.svg)
+        matches+=("$candidate")
+        ;;
+    esac
+  done < <(compgen -f -- "$cur")
+
+  COMPREPLY=("${matches[@]}")
+  compopt -o filenames 2>/dev/null || true
+}
+
 _cli_tools_completion() {
   local cur command_name candidates root
   cur="${COMP_WORDS[COMP_CWORD]:-}"
@@ -127,6 +150,11 @@ _cli_tools_completion() {
       fi
     fi
     _cli_tools_complete_directories "$cur"
+    return 0
+  fi
+
+  if [[ "$command_name" == "img-viewer" && "${COMP_CWORD:-0}" -eq 2 ]]; then
+    _cli_tools_complete_images_and_directories "$cur"
     return 0
   fi
 
