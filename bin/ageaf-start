@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools ageaf-start [--path PATH] [--port PORT] [--name NAME]
+  ageaf-start [--path PATH] [--port PORT] [--name NAME]
+
+Start Ageaf's extension watcher and local host as one managed background
+service.
+
+Options:
+  --path PATH  Ageaf repository path. Defaults to ~/Ageaf.
+  --port PORT  Host port. Defaults to 3210.
+  --name NAME  Named port service name. Defaults to ageaf.
+  -h, --help   Show this help.
+
+Stop it later with:
+  cli-tools ageaf-stop
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+validate_port() {
+  local port="$1"
+  local port_number
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  port_number=$((10#$port))
+  (( port_number >= 1 && port_number <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+
+ageaf_path="~/Ageaf"
+port="3210"
+name="ageaf"
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --path)
+      [[ "$#" -ge 2 ]] || die "missing value for --path"
+      ageaf_path="$2"
+      shift 2
+      ;;
+    --path=*)
+      ageaf_path="${1#--path=}"
+      shift
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      shift
+      ;;
+    *)
+      die "unknown argument: $1"
+      ;;
+  esac
+done
+
+require_cmd bash
+require_cmd npm
+
+validate_port "$port"
+
+expanded_ageaf_path="$(expand_path "$ageaf_path")"
+[[ -d "$expanded_ageaf_path" ]] || die "Ageaf path is not a directory: $expanded_ageaf_path"
+ageaf_root="$(CDPATH= cd -- "$expanded_ageaf_path" && pwd)" ||
+  die "failed to resolve Ageaf path: $expanded_ageaf_path"
+
+[[ -f "$ageaf_root/package.json" ]] ||
+  die "missing Ageaf package.json: $ageaf_root/package.json"
+[[ -d "$ageaf_root/host" ]] ||
+  die "missing Ageaf host directory: $ageaf_root/host"
+[[ -f "$ageaf_root/host/package.json" ]] ||
+  die "missing Ageaf host package.json: $ageaf_root/host/package.json"
+[[ -d "$ageaf_root/node_modules" ]] ||
+  die "missing Ageaf dependencies; run: cd $ageaf_root && npm install"
+[[ -d "$ageaf_root/host/node_modules" ]] ||
+  die "missing Ageaf host dependencies; run: cd $ageaf_root/host && npm install"
+
+"$bin_dir/port-start" "$name" "$port" -- \
+  bash -lc '
+set -euo pipefail
+
+ageaf_root="$1"
+port="$2"
+watch_pid=""
+host_pid=""
+
+cleanup() {
+  local status=$?
+  local pgid=""
+  trap - EXIT INT TERM HUP
+
+  pgid="$(ps -o pgid= -p "$$" 2>/dev/null | tr -d "[:space:]" || true)"
+  if [[ "$pgid" =~ ^[0-9]+$ && "$pgid" == "$$" ]]; then
+    trap "" INT TERM HUP
+    kill -TERM -- "-$pgid" 2>/dev/null || true
+  else
+    if [[ -n "${host_pid:-}" ]]; then
+      kill -TERM "$host_pid" 2>/dev/null || true
+    fi
+    if [[ -n "${watch_pid:-}" ]]; then
+      kill -TERM "$watch_pid" 2>/dev/null || true
+    fi
+  fi
+
+  if [[ -n "${host_pid:-}" ]]; then
+    wait "$host_pid" 2>/dev/null || true
+  fi
+  if [[ -n "${watch_pid:-}" ]]; then
+    wait "$watch_pid" 2>/dev/null || true
+  fi
+
+  exit "$status"
+}
+
+trap cleanup EXIT INT TERM HUP
+
+cd "$ageaf_root"
+npm run watch &
+watch_pid=$!
+
+cd "$ageaf_root/host"
+HOST=127.0.0.1 PORT="$port" npm run dev &
+host_pid=$!
+
+wait -n "$watch_pid" "$host_pid"
+' bash "$ageaf_root" "$port"
+
+printf 'Ageaf host URL: http://127.0.0.1:%s/\n' "$port"
+printf 'Ageaf extension directory: %s/build\n' "$ageaf_root"
+if [[ "$name" == "ageaf" ]]; then
+  printf 'Stop Ageaf with: cli-tools ageaf-stop\n'
+else
+  printf 'Stop Ageaf with: cli-tools ageaf-stop --name %s\n' "$name"
+fi

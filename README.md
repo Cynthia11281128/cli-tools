@@ -42,6 +42,7 @@ Core requirements:
 
 Command-specific requirements:
 
+- `npm` for Ageaf commands
 - `dvc` for DVC commands
 - `ssh` for remote port listing and tunnels
 - `npx` for Codex commands
@@ -103,6 +104,14 @@ Available keys:
 | `CODEX_WEB_PASSWORD` | `codex-web` | Password passed to `codexapp`; keep this private. |
 
 ## Commands
+
+### Ageaf
+
+| Command | Purpose | Typical use |
+|---|---|---|
+| `cli-tools ageaf-start` | Start Ageaf's extension watcher and local host as one managed background service. Defaults to `~/Ageaf` on port `3210`. | `cli-tools ageaf-start` |
+| `cli-tools ageaf-stop` | Stop the Ageaf service started by `ageaf-start`. | `cli-tools ageaf-stop` |
+| `cli-tools port-list --full` | Check Ageaf service status, PID, command, and log path. | `cli-tools port-list --full` |
 
 ### Codex
 
@@ -218,6 +227,42 @@ cli-tools codex-web --path /path/to/project --port 5900
 
 `codex-web` prompts for a project path and port if they are not provided. Store
 the password in local `.env` as `CODEX_WEB_PASSWORD`; it is not tracked by Git.
+
+## Ageaf Tools
+
+Ageaf repository: [OniReimu/Ageaf](https://github.com/OniReimu/Ageaf).
+
+Start Ageaf for Overleaf:
+
+```bash
+cli-tools ageaf-start
+```
+
+The command starts `npm run watch` in `~/Ageaf` and
+`HOST=127.0.0.1 PORT=3210 npm run dev` in `~/Ageaf/host` as one managed
+background service named `ageaf`.
+
+Use a custom checkout, port, or service name when needed:
+
+```bash
+cli-tools ageaf-start --path ~/Ageaf --port 3210 --name ageaf
+```
+
+Check status and logs:
+
+```bash
+cli-tools port-list --full
+```
+
+Stop Ageaf:
+
+```bash
+cli-tools ageaf-stop
+```
+
+The first time you use Ageaf, load the Chrome extension from
+`/home/cynthia/Ageaf/build` in `chrome://extensions`. After that, start Ageaf
+with `cli-tools ageaf-start` and refresh the Overleaf project page.
 
 ## Viewers
 
