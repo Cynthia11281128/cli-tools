@@ -242,7 +242,7 @@
 
     <script type="module">
       import * as THREE from "three";
-      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { TrackballControls } from "three/addons/controls/TrackballControls.js";
       import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
       const canvas = document.getElementById("viewer");
@@ -275,10 +275,12 @@
       renderer.localClippingEnabled = true;
 
       const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1000);
-      const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.08;
-      controls.screenSpacePanning = true;
+      const controls = new TrackballControls(camera, renderer.domElement);
+      controls.rotateSpeed = 4.0;
+      controls.zoomSpeed = 1.2;
+      controls.panSpeed = 0.35;
+      controls.staticMoving = false;
+      controls.dynamicDampingFactor = 0.12;
 
       scene.add(new THREE.HemisphereLight(0xf5f1e8, 0x30323b, 2.0));
 
@@ -337,6 +339,7 @@
         renderer.setSize(width, height, false);
         camera.aspect = width / Math.max(height, 1);
         camera.updateProjectionMatrix();
+        controls.handleResize();
       }
 
       function frameObject(radius) {
@@ -345,12 +348,17 @@
 
         camera.near = Math.max(safeRadius / 1000, 0.0001);
         camera.far = Math.max(safeRadius * 1000, 100);
+        camera.up.set(0, 1, 0);
         camera.position.set(distance, distance * 0.72, distance);
         camera.updateProjectionMatrix();
 
         controls.target.set(0, 0, 0);
         controls.minDistance = safeRadius * 0.01;
         controls.maxDistance = safeRadius * 80;
+        controls.target0.copy(controls.target);
+        controls.position0.copy(camera.position);
+        controls.up0.copy(camera.up);
+        controls.zoom0 = camera.zoom;
         controls.update();
 
         grid.scale.setScalar(safeRadius);
