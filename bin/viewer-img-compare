@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools viewer-img-compare LEFT_IMG_DIR RIGHT_IMG_DIR [--port PORT] [--name NAME] [--host HOST]
+  viewer-img-compare LEFT_IMG_DIR RIGHT_IMG_DIR [--port PORT] [--name NAME] [--host HOST]
+
+Start a lightweight side-by-side web viewer for two image folders.
+If a folder argument is omitted, the command prompts for it interactively with
+Tab completion.
+
+Supported image formats: jpg, jpeg, png, webp, gif, svg.
+
+Options:
+  --port PORT   Port to use. Defaults to an automatically selected free port.
+  --name NAME   Named port service name. Defaults to img-compare-<port>.
+  --host HOST   Bind host for the web server. Defaults to 127.0.0.1.
+  -h, --help    Show this help.
+
+Examples:
+  cli-tools viewer-img-compare ~/outputs/a ~/outputs/b
+  cli-tools viewer-img-compare /data/pred /data/gt --port 8765 --name pred-vs-gt
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+find_free_port() {
+  local host="$1"
+
+  python3 - "$host" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind((host, 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+is_supported_image_path() {
+  local path="${1,,}"
+
+  case "$path" in
+    *.jpg|*.jpeg|*.png|*.webp|*.gif|*.svg)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+directory_has_supported_images() {
+  local dir="$1"
+  local path
+
+  while IFS= read -r -d '' path; do
+    if is_supported_image_path "$path"; then
+      return 0
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f -print0)
+
+  return 1
+}
+
+read_folder_path() {
+  local label="$1"
+  local value
+
+  if [[ -t 0 ]]; then
+    IFS= read -e -r -p "$label" value ||
+      die "failed to read image folder"
+  else
+    printf '%s' "$label" >&2
+    IFS= read -r value || die "failed to read image folder"
+  fi
+
+  printf '%s\n' "$value"
+}
+
+resolve_image_folder() {
+  local input="$1"
+  local label="$2"
+  local expanded
+
+  [[ -n "$input" ]] || die "$label image folder is required"
+  expanded="$(expand_path "$input")"
+  [[ -d "$expanded" ]] || die "$label image folder does not exist: $expanded"
+  directory_has_supported_images "$expanded" ||
+    die "$label image folder has no supported images: $expanded"
+  realpath -- "$expanded" ||
+    die "failed to resolve $label image folder: $expanded"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+server_path="$repo_dir/lib/img-compare-viewer/server.py"
+
+host="127.0.0.1"
+port=""
+name=""
+left_input=""
+right_input=""
+prompted_for_folder_path="no"
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      shift
+      ;;
+    --host)
+      [[ "$#" -ge 2 ]] || die "missing value for --host"
+      host="$2"
+      shift 2
+      ;;
+    --host=*)
+      host="${1#--host=}"
+      shift
+      ;;
+    --)
+      shift
+      [[ "$#" -le 2 ]] || die "expected two image folders"
+      if [[ "$#" -ge 1 ]]; then
+        left_input="$1"
+      fi
+      if [[ "$#" -ge 2 ]]; then
+        right_input="$2"
+      fi
+      shift "$#"
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      if [[ -z "$left_input" ]]; then
+        left_input="$1"
+      elif [[ -z "$right_input" ]]; then
+        right_input="$1"
+      else
+        die "expected two image folders"
+      fi
+      shift
+      ;;
+  esac
+done
+
+require_cmd python3
+require_cmd realpath
+require_cmd find
+
+[[ -f "$server_path" ]] || die "missing image compare viewer server: $server_path"
+
+if [[ -z "$left_input" ]]; then
+  left_input="$(read_folder_path 'Left image folder: ')"
+  prompted_for_folder_path="yes"
+fi
+if [[ -z "$right_input" ]]; then
+  right_input="$(read_folder_path 'Right image folder: ')"
+  prompted_for_folder_path="yes"
+fi
+
+left_folder="$(resolve_image_folder "$left_input" "left")"
+right_folder="$(resolve_image_folder "$right_input" "right")"
+
+if [[ -n "$port" ]]; then
+  validate_port "$port"
+else
+  port="$(find_free_port "$host")" || die "failed to find a free port for host: $host"
+fi
+
+if [[ -z "$name" && "$prompted_for_folder_path" == "yes" && -t 0 ]]; then
+  default_name="img-compare-$port"
+  printf 'Service name [%s]: ' "$default_name" >&2
+  IFS= read -r name_input || die "failed to read service name"
+  if [[ -n "$name_input" ]]; then
+    name="$name_input"
+  fi
+fi
+
+if [[ -z "$name" ]]; then
+  name="img-compare-$port"
+fi
+
+"$bin_dir/port-start" "$name" "$port" -- \
+  python3 "$server_path" \
+    --left-folder "$left_folder" \
+    --right-folder "$right_folder" \
+    --port "$port" \
+    --host "$host" \
+    --name "$name"
+
+url_host="$host"
+if [[ "$url_host" == "0.0.0.0" || "$url_host" == "::" ]]; then
+  url_host="127.0.0.1"
+fi
+
+printf 'Viewer URL: http://%s:%s/\n' "$url_host" "$port"
+printf 'Left image folder: %s\n' "$left_folder"
+printf 'Right image folder: %s\n' "$right_folder"
+printf 'Remote access: run cli-tools ssh-tunnel --all from your local machine.\n'

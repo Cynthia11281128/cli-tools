@@ -134,6 +134,7 @@ Available keys:
 |---|---|---|
 | `cli-tools viewer-glb` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools viewer-glb /path/to/model.glb` |
 | `cli-tools viewer-img` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools viewer-img /path/to/images` |
+| `cli-tools viewer-img-compare` | Start a side-by-side web viewer for two image folders, with independent left and right selectors. | `cli-tools viewer-img-compare /path/to/left /path/to/right` |
 | `cli-tools viewer-ply` | Start a lightweight Three.js viewer for a `.ply` file, ordinary PLY folder, or PLY sequence directory and register it as a named port service. | `cli-tools viewer-ply /path/to/a.ply --port 8765` |
 | `cli-tools viewer-ply-add` | Add another `.ply` file to an already running ordinary `viewer-ply` page by port. Folder and sequence viewers are not supported. | `cli-tools viewer-ply-add /path/to/b.ply 8765` |
 | `cli-tools viewer-video` | Start a lightweight web viewer for a `.mp4` or `.mov` video and register it as a named port service. | `cli-tools viewer-video /path/to/video.MOV` |
@@ -313,11 +314,25 @@ Start a single-image or image-folder viewer:
 cli-tools viewer-img /path/to/image.png
 cli-tools viewer-img /path/to/images
 cli-tools viewer-img /path/to/images --port 8765 --name image-review
+cli-tools viewer-img /path/to/images --sample-every 5
 ```
 
-Folder mode reads supported images from the top-level directory, shows a left
-side list for direct selection, and supports left/right arrow key navigation.
+Folder mode reads supported images and top-level image symlinks from the
+directory, shows a left side list for direct selection, and supports left/right
+arrow key navigation.
+Use `--sample-every N` to keep every Nth image after natural sorting.
 Supported formats are `jpg`, `jpeg`, `png`, `webp`, `gif`, and `svg`.
+
+Compare two image folders side by side:
+
+```bash
+cli-tools viewer-img-compare /path/to/pred /path/to/gt
+cli-tools viewer-img-compare /path/to/a /path/to/b --port 8765 --name img-compare
+```
+
+Image compare mode reads supported images from the top level of each folder.
+The left and right panels switch independently: use the list buttons, `A`/`D`
+for the left side, and left/right arrow keys for the right side.
 
 All viewers register themselves through `port-start`, print the local URL, and
 show the service name in the browser tab and viewer title. For remote servers,

@@ -4,8 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  cli-tools viewer-img [IMAGE_OR_DIR] [--port PORT] [--name NAME] [--host HOST]
-  viewer-img [IMAGE_OR_DIR] [--port PORT] [--name NAME] [--host HOST]
+  cli-tools viewer-img [IMAGE_OR_DIR] [--sample-every N] [--port PORT] [--name NAME] [--host HOST]
+  viewer-img [IMAGE_OR_DIR] [--sample-every N] [--port PORT] [--name NAME] [--host HOST]
 
 Start a lightweight web viewer for a single image file or a folder of images.
 If IMAGE_OR_DIR is omitted, the command prompts for the path interactively with
@@ -14,15 +14,18 @@ Tab completion.
 Supported image formats: jpg, jpeg, png, webp, gif, svg.
 
 Options:
-  --port PORT   Port to use. Defaults to an automatically selected free port.
-  --name NAME   Named port service name. Defaults to img-view-<port>.
-  --host HOST   Bind host for the web server. Defaults to 127.0.0.1.
-  -h, --help    Show this help.
+  --sample-every N  In folder mode, keep every Nth image after sorting. Default: 1.
+  --sample-rate N   Alias for --sample-every.
+  --port PORT       Port to use. Defaults to an automatically selected free port.
+  --name NAME       Named port service name. Defaults to img-view-<port>.
+  --host HOST       Bind host for the web server. Defaults to 127.0.0.1.
+  -h, --help        Show this help.
 
 Examples:
   cli-tools viewer-img
   cli-tools viewer-img ~/outputs/frame.png
   cli-tools viewer-img ~/outputs/images --port 8765 --name my-images
+  cli-tools viewer-img ~/outputs/images --sample-every 5
 USAGE
 }
 
@@ -79,6 +82,15 @@ validate_port() {
     die "invalid port: $port; expected an integer from 1 to 65535"
 }
 
+validate_sample_every() {
+  local sample_every="$1"
+
+  [[ "$sample_every" =~ ^[0-9]+$ ]] ||
+    die "invalid sample frequency: $sample_every; expected a positive integer"
+  (( sample_every >= 1 )) ||
+    die "invalid sample frequency: $sample_every; expected a positive integer"
+}
+
 find_free_port() {
   local host="$1"
 
@@ -111,10 +123,10 @@ directory_has_supported_images() {
   local path
 
   while IFS= read -r -d '' path; do
-    if is_supported_image_path "$path"; then
+    if [[ -f "$path" ]] && is_supported_image_path "$path"; then
       return 0
     fi
-  done < <(find "$dir" -maxdepth 1 -type f -print0)
+  done < <(find "$dir" -maxdepth 1 \( -type f -o -type l \) -print0)
 
   return 1
 }
@@ -133,6 +145,24 @@ read_image_path() {
   printf '%s\n' "$value"
 }
 
+read_sample_every() {
+  local value
+
+  if [[ -t 0 ]]; then
+    IFS= read -e -r -p 'Sample every N images [1]: ' value ||
+      die "failed to read sample frequency"
+  else
+    printf 'Sample every N images [1]: ' >&2
+    IFS= read -r value || die "failed to read sample frequency"
+  fi
+
+  if [[ -z "$value" ]]; then
+    value="1"
+  fi
+  validate_sample_every "$value"
+  printf '%s\n' "$value"
+}
+
 script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
 bin_dir="$(dirname -- "$script_path")"
 repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
@@ -142,6 +172,8 @@ host="127.0.0.1"
 port=""
 name=""
 image_input=""
+sample_every="1"
+sample_every_set="no"
 prompted_for_image_path="no"
 
 while [[ "$#" -gt 0 ]]; do
@@ -177,6 +209,17 @@ while [[ "$#" -gt 0 ]]; do
       host="${1#--host=}"
       shift
       ;;
+    --sample-every|--sample-rate)
+      [[ "$#" -ge 2 ]] || die "missing value for $1"
+      sample_every="$2"
+      sample_every_set="yes"
+      shift 2
+      ;;
+    --sample-every=*|--sample-rate=*)
+      sample_every="${1#*=}"
+      sample_every_set="yes"
+      shift
+      ;;
     --)
       shift
       [[ "$#" -le 1 ]] || die "expected at most one image file or folder"
@@ -201,6 +244,7 @@ require_cmd realpath
 require_cmd find
 
 [[ -f "$server_path" ]] || die "missing image viewer server: $server_path"
+validate_sample_every "$sample_every"
 
 if [[ -z "$image_input" ]]; then
   image_input="$(read_image_path)"
@@ -227,6 +271,14 @@ else
   die "image file or folder does not exist: $expanded_image_path"
 fi
 
+if [[ -n "$image_path" && "$sample_every" != "1" ]]; then
+  die "--sample-every is only supported for image folders"
+fi
+
+if [[ -n "$folder_path" && "$prompted_for_image_path" == "yes" && "$sample_every_set" == "no" ]]; then
+  sample_every="$(read_sample_every)"
+fi
+
 if [[ -n "$port" ]]; then
   validate_port "$port"
 else
@@ -248,7 +300,7 @@ fi
 
 server_args=(python3 "$server_path" --port "$port" --host "$host" --name "$name")
 if [[ -n "$folder_path" ]]; then
-  server_args+=(--folder "$folder_path")
+  server_args+=(--folder "$folder_path" --sample-every "$sample_every")
 else
   server_args+=(--image "$image_path")
 fi
@@ -263,6 +315,7 @@ fi
 printf 'Viewer URL: http://%s:%s/\n' "$url_host" "$port"
 if [[ -n "$folder_path" ]]; then
   printf 'Image folder: %s\n' "$folder_path"
+  printf 'Sample every: %s\n' "$sample_every"
 else
   printf 'Image file: %s\n' "$image_path"
 fi

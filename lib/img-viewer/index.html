@@ -323,7 +323,11 @@
 
         if (mode === "folder") {
           images = meta.images || [];
-          imageCount.textContent = `${images.length} images`;
+          if (meta.sample_every && meta.sample_every > 1) {
+            imageCount.textContent = `${images.length} / ${meta.total_count || images.length} images, every ${meta.sample_every}`;
+          } else {
+            imageCount.textContent = `${images.length} images`;
+          }
           renderList();
         } else {
           app.classList.add("single");

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small, restricted HTTP server for cli-tools img-viewer."""
+"""Small, restricted HTTP server for cli-tools img-compare-viewer."""
 
 from __future__ import annotations
 
@@ -29,20 +29,19 @@ CONTENT_TYPES = {
 class ViewerServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
-    mode: str
-    image_path: Path | None
-    folder_path: Path | None
-    images: list[Path]
-    image_by_name: dict[str, Path]
-    total_count: int
-    sample_every: int
     index_path: Path
     viewer_name: str
+    left_folder_path: Path
+    right_folder_path: Path
+    left_images: list[Path]
+    right_images: list[Path]
+    left_by_name: dict[str, Path]
+    right_by_name: dict[str, Path]
 
 
 class ViewerHandler(BaseHTTPRequestHandler):
     server: ViewerServer
-    server_version = "img-viewer/1.0"
+    server_version = "img-compare-viewer/1.0"
 
     def do_GET(self) -> None:
         self._route(head_only=False)
@@ -62,49 +61,35 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self._send_json(self._meta_payload(), head_only)
             return
 
-        if self.server.mode == "single" and path == "/image":
-            assert self.server.image_path is not None
-            self._send_image(self.server.image_path, head_only)
+        if path.startswith("/left/"):
+            self._send_side_image("left", unquote(path[len("/left/") :]), head_only)
             return
 
-        if self.server.mode == "folder" and path.startswith("/images/"):
-            image_name = unquote(path[len("/images/") :])
-            image_path = self._folder_image_path(image_name)
-            if image_path is None:
-                self.send_error(HTTPStatus.NOT_FOUND, "image not found")
-                return
-            self._send_image(image_path, head_only)
+        if path.startswith("/right/"):
+            self._send_side_image("right", unquote(path[len("/right/") :]), head_only)
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
-    def _folder_image_path(self, image_name: str) -> Path | None:
+    def _send_side_image(self, side: str, image_name: str, head_only: bool) -> None:
+        image_path = self._side_image_path(side, image_name)
+        if image_path is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "image not found")
+            return
+        self._send_image(image_path, head_only)
+
+    def _side_image_path(self, side: str, image_name: str) -> Path | None:
         if "/" in image_name or "\\" in image_name or image_name in {"", ".", ".."}:
             return None
-        return self.server.image_by_name.get(image_name)
+        if side == "left":
+            return self.server.left_by_name.get(image_name)
+        return self.server.right_by_name.get(image_name)
 
     def _meta_payload(self) -> dict[str, Any]:
-        if self.server.mode == "single":
-            assert self.server.image_path is not None
-            return {
-                "mode": "single",
-                "name": self.server.viewer_name,
-                "path": str(self.server.image_path),
-                "image": image_item(self.server.image_path, "/image"),
-            }
-
-        assert self.server.folder_path is not None
         return {
-            "mode": "folder",
             "name": self.server.viewer_name,
-            "path": str(self.server.folder_path),
-            "count": len(self.server.images),
-            "total_count": self.server.total_count,
-            "sample_every": self.server.sample_every,
-            "images": [
-                image_item(path, "/images/" + quote(path.name, safe=""))
-                for path in self.server.images
-            ],
+            "left": folder_payload("left", self.server.left_folder_path, self.server.left_images),
+            "right": folder_payload("right", self.server.right_folder_path, self.server.right_images),
         }
 
     def _send_json(self, payload: dict[str, Any], head_only: bool) -> None:
@@ -148,6 +133,18 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return
 
 
+def folder_payload(side: str, folder_path: Path, images: list[Path]) -> dict[str, Any]:
+    return {
+        "path": str(folder_path),
+        "name": folder_path.name,
+        "count": len(images),
+        "images": [
+            image_item(path, f"/{side}/" + quote(path.name, safe=""))
+            for path in images
+        ],
+    }
+
+
 def image_item(path: Path, url: str) -> dict[str, Any]:
     return {
         "name": path.name,
@@ -167,42 +164,44 @@ def is_supported_image(path: Path) -> bool:
 
 
 def collect_folder_images(folder_path: Path) -> list[Path]:
+    root = folder_path.resolve()
     images: list[Path] = []
 
     for path in folder_path.iterdir():
         if not path.is_file() or not is_supported_image(path):
             continue
-        images.append(path)
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        images.append(resolved)
 
     return sorted(images, key=natural_key)
 
 
-def sample_images(images: list[Path], sample_every: int) -> list[Path]:
-    if sample_every <= 1:
-        return images
-    return images[::sample_every]
-
-
-def positive_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError("expected a positive integer") from None
-    if parsed < 1:
-        raise argparse.ArgumentTypeError("expected a positive integer")
-    return parsed
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Serve an image file or image folder in a browser viewer.")
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--image", help="Image file to serve")
-    mode.add_argument("--folder", help="Folder containing images to serve")
-    parser.add_argument("--sample-every", type=positive_int, default=1, help="In folder mode, keep every Nth image after sorting")
+    parser = argparse.ArgumentParser(description="Serve two image folders in a side-by-side browser viewer.")
+    parser.add_argument("--left-folder", required=True, help="Left image folder to serve")
+    parser.add_argument("--right-folder", required=True, help="Right image folder to serve")
     parser.add_argument("--port", required=True, type=int, help="Port to bind")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--name", default="", help="Viewer name to show in the browser")
     return parser.parse_args()
+
+
+def prepare_folder(path_text: str, label: str) -> tuple[Path, list[Path]]:
+    folder_path = Path(path_text).expanduser().resolve()
+    if not folder_path.is_dir():
+        print(f"error: {label} image folder does not exist: {folder_path}", file=sys.stderr)
+        raise SystemExit(2)
+
+    images = collect_folder_images(folder_path)
+    if not images:
+        print(f"error: {label} image folder has no supported images: {folder_path}", file=sys.stderr)
+        raise SystemExit(2)
+
+    return folder_path, images
 
 
 def main() -> int:
@@ -213,58 +212,24 @@ def main() -> int:
         print(f"error: missing viewer page: {index_path}", file=sys.stderr)
         return 2
 
-    mode = "single"
-    image_path = None
-    folder_path = None
-    images: list[Path] = []
-    total_count = 0
-    default_name = ""
-
-    if args.image:
-        if args.sample_every != 1:
-            print("error: --sample-every is only supported with --folder", file=sys.stderr)
-            return 2
-        image_path = Path(args.image).expanduser().resolve()
-        if not image_path.is_file():
-            print(f"error: image file does not exist: {image_path}", file=sys.stderr)
-            return 2
-        if not is_supported_image(image_path):
-            print(f"error: unsupported image format: {image_path}", file=sys.stderr)
-            return 2
-        default_name = image_path.name
-    else:
-        mode = "folder"
-        folder_path = Path(args.folder).expanduser().resolve()
-        if not folder_path.is_dir():
-            print(f"error: image folder does not exist: {folder_path}", file=sys.stderr)
-            return 2
-        all_images = collect_folder_images(folder_path)
-        if not all_images:
-            print(f"error: folder has no supported images: {folder_path}", file=sys.stderr)
-            return 2
-        total_count = len(all_images)
-        images = sample_images(all_images, args.sample_every)
-        default_name = folder_path.name
+    left_folder_path, left_images = prepare_folder(args.left_folder, "left")
+    right_folder_path, right_images = prepare_folder(args.right_folder, "right")
 
     server = ViewerServer((args.host, args.port), ViewerHandler)
-    server.mode = mode
-    server.image_path = image_path
-    server.folder_path = folder_path
-    server.images = images
-    server.image_by_name = {path.name: path for path in images}
-    server.total_count = total_count
-    server.sample_every = args.sample_every
     server.index_path = index_path
-    server.viewer_name = args.name or default_name
+    server.viewer_name = args.name or f"{left_folder_path.name} vs {right_folder_path.name}"
+    server.left_folder_path = left_folder_path
+    server.right_folder_path = right_folder_path
+    server.left_images = left_images
+    server.right_images = right_images
+    server.left_by_name = {path.name: path for path in left_images}
+    server.right_by_name = {path.name: path for path in right_images}
 
-    if mode == "folder":
-        print(
-            f"serving image folder {folder_path} at http://{args.host}:{args.port}/ "
-            f"({len(images)}/{total_count} images, sample every {args.sample_every})",
-            flush=True,
-        )
-    else:
-        print(f"serving {image_path} at http://{args.host}:{args.port}/", flush=True)
+    print(
+        f"serving image folders {left_folder_path} and {right_folder_path} "
+        f"at http://{args.host}:{args.port}/",
+        flush=True,
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -447,7 +447,7 @@
 
     <script type="module">
       import * as THREE from "three";
-      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { ArcballControls } from "three/addons/controls/ArcballControls.js";
       import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
 
       const canvas = document.getElementById("viewer");
@@ -484,10 +484,12 @@
       renderer.outputColorSpace = THREE.SRGBColorSpace;
 
       const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1000);
-      const controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.08;
-      controls.screenSpacePanning = true;
+      const controls = new ArcballControls(camera, renderer.domElement);
+      controls.enableAnimations = true;
+      controls.enableGizmos = false;
+      controls.cursorZoom = true;
+      controls.scaleFactor = 1.12;
+      controls.rotateSpeed = 1.0;
 
       scene.add(new THREE.HemisphereLight(0xf4f1e8, 0x30323b, 2.2));
 
@@ -565,12 +567,13 @@
 
         camera.near = Math.max(safeRadius / 1000, 0.0001);
         camera.far = Math.max(safeRadius * 1000, 100);
+        camera.up.set(0, 1, 0);
         camera.position.set(distance, distance * 0.72, distance);
-        camera.updateProjectionMatrix();
 
         controls.target.set(0, 0, 0);
         controls.minDistance = safeRadius * 0.01;
         controls.maxDistance = safeRadius * 80;
+        controls.setCamera(camera);
         controls.update();
 
         grid.scale.setScalar(safeRadius);

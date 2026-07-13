@@ -185,6 +185,11 @@ _cli_tools_completion() {
     return 0
   fi
 
+  if [[ "$command_name" == "viewer-img-compare" && "${COMP_CWORD:-0}" -ge 2 && "${COMP_CWORD:-0}" -le 3 ]]; then
+    _cli_tools_complete_directories "$cur"
+    return 0
+  fi
+
   if [[ "$command_name" == "viewer-ply" && "${COMP_CWORD:-0}" -eq 2 ]]; then
     _cli_tools_complete_ply_and_directories "$cur"
     return 0
