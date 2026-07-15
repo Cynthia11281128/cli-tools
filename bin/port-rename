@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools port-rename
+  cli-tools port-rename <name-or-port> <new-name>
+  port-rename
+  port-rename <name-or-port> <new-name>
+
+Rename a named port service managed by cli-tools.
+
+Run without arguments to choose the service and new name interactively.
+
+Targets may be service names or managed port numbers. Numeric targets are
+resolved as ports first, then service names.
+
+Renaming updates only the cli-tools registry name. It does not restart the
+service, move the log file, or rewrite the recorded launch command.
+USAGE
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || {
+  printf 'error: failed to resolve script path\n' >&2
+  exit 1
+}
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || {
+  printf 'error: failed to resolve cli-tools root\n' >&2
+  exit 1
+}
+
+# shellcheck source=../lib/port-registry.bash
+source "$repo_dir/lib/port-registry.bash"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+port_number_for_target() {
+  local target="$1"
+  local port_number
+
+  [[ "$target" =~ ^[0-9]+$ ]] || return 1
+  port_number=$((10#$target))
+  (( port_number >= 1 && port_number <= 65535 )) || return 1
+  printf '%s\n' "$port_number"
+}
+
+registry_line_for_target() {
+  local target="$1"
+  local target_port=""
+  local line=""
+
+  if target_port="$(port_number_for_target "$target")"; then
+    line="$(port_registry_line_by_port "$target_port" || true)"
+    if [[ -n "$line" ]]; then
+      printf '%s\n' "$line"
+      return 0
+    fi
+  fi
+
+  port_validate_name "$target"
+
+  line="$(port_registry_line_by_name "$target" || true)"
+  if [[ -n "$line" ]]; then
+    printf '%s\n' "$line"
+    return 0
+  fi
+
+  if [[ "$target" =~ ^[0-9]+$ ]]; then
+    if [[ -n "$target_port" ]]; then
+      port_die "unknown named port service or managed port: $target"
+    fi
+    port_die "unknown named port service, and not a valid port: $target"
+  fi
+
+  port_die "unknown named port service: $target"
+}
+
+read_interactive_args() {
+  local -a lines=()
+  local line name port pid start_time log_path command_text
+  local index selection selected_index prompt_label
+  local name_width=4 port_width=4
+
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    usage >&2
+    port_die "interactive mode requires a terminal; pass <name-or-port> <new-name> for non-interactive use"
+  fi
+
+  port_registry_lock
+  port_registry_cleanup_stale
+
+  if [[ "$(port_registry_count_entries)" -eq 0 ]]; then
+    port_registry_unlock
+    printf 'No named port services.\n'
+    exit 0
+  fi
+
+  mapfile -t lines < <(sort -f -t $'\t' -k1,1 -k2,2n -- "$PORT_REGISTRY")
+  port_registry_unlock
+
+  for line in "${lines[@]}"; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r name port pid start_time log_path command_text <<<"$line"
+    if (( ${#name} > name_width )); then
+      name_width="${#name}"
+    fi
+    if (( ${#port} > port_width )); then
+      port_width="${#port}"
+    fi
+  done
+
+  printf 'Available named port services:\n'
+  printf '  %-4s %-*s %-*s %s\n' "#" "$name_width" "NAME" "$port_width" "PORT" "PID"
+
+  index=1
+  for line in "${lines[@]}"; do
+    [[ -n "$line" ]] || continue
+    IFS=$'\t' read -r name port pid start_time log_path command_text <<<"$line"
+    printf '  %-4s %-*s %-*s %s\n' "$index" "$name_width" "$name" "$port_width" "$port" "$pid"
+    index=$((index + 1))
+  done
+
+  printf 'Select service to rename (number, name, or port): '
+  IFS= read -r selection || port_die "selection is required"
+  [[ -n "$selection" ]] || port_die "selection is required"
+
+  prompt_label="$selection"
+  if [[ "$selection" =~ ^[0-9]+$ ]]; then
+    selected_index=$((10#$selection))
+    if (( selected_index >= 1 && selected_index <= ${#lines[@]} )); then
+      line="${lines[$((selected_index - 1))]}"
+      IFS=$'\t' read -r name port pid start_time log_path command_text <<<"$line"
+      selection="$name"
+      prompt_label="$name"
+    fi
+  fi
+
+  printf 'New name for %s: ' "$prompt_label"
+  IFS= read -r PORT_RENAME_NEW_NAME || port_die "new name is required"
+  [[ -n "$PORT_RENAME_NEW_NAME" ]] || port_die "new name is required"
+
+  PORT_RENAME_TARGET="$selection"
+}
+
+if [[ "$#" -eq 0 ]]; then
+  read_interactive_args
+  target="$PORT_RENAME_TARGET"
+  new_name="$PORT_RENAME_NEW_NAME"
+elif [[ "$#" -eq 2 ]]; then
+  target="$1"
+  new_name="$2"
+else
+  usage >&2
+  port_die "expected <name-or-port> and <new-name>"
+fi
+
+port_validate_name "$new_name"
+
+port_registry_lock
+port_registry_cleanup_stale
+
+line="$(registry_line_for_target "$target")"
+port_parse_registry_line "$line"
+
+old_name="$PORT_ENTRY_NAME"
+port="$PORT_ENTRY_PORT"
+pid="$PORT_ENTRY_PID"
+log_path="$PORT_ENTRY_LOG_PATH"
+
+if ! port_service_alive "$pid"; then
+  port_registry_remove_name "$old_name"
+  port_die "named port service is no longer running: $old_name"
+fi
+
+if [[ "$old_name" == "$new_name" ]]; then
+  printf 'Named port service already named: %s\n' "$new_name"
+  printf '  port: %s\n' "$port"
+  printf '  pid: %s\n' "$pid"
+  printf '  log: %s\n' "$log_path"
+  exit 0
+fi
+
+if port_registry_active_name_exists "$new_name"; then
+  port_die "named port service already exists: $new_name"
+fi
+
+if ! port_registry_rename_name "$old_name" "$new_name"; then
+  port_die "failed to rename named port service: $old_name"
+fi
+
+printf 'Renamed named port service: %s -> %s\n' "$old_name" "$new_name"
+printf '  port: %s\n' "$port"
+printf '  pid: %s\n' "$pid"
+printf '  log: %s\n' "$log_path"

@@ -44,7 +44,7 @@ _cli_tools_candidates() {
   done < <(find "$bin_dir" -maxdepth 1 -type f -perm -u+x | sort)
 }
 
-_cli_tools_port_stop_targets() {
+_cli_tools_port_targets() {
   local completion_path repo_dir registry
   local name port pid start_time log_path command_text
 
@@ -161,10 +161,22 @@ _cli_tools_completion() {
 
   command_name="${COMP_WORDS[1]:-}"
   if [[ "$command_name" == "port-stop" && "${COMP_CWORD:-0}" -ge 2 ]]; then
-    candidates="$(_cli_tools_port_stop_targets)"
+    candidates="$(_cli_tools_port_targets)"
     if [[ "${COMP_CWORD:-0}" -eq 2 ]]; then
       candidates="${candidates}"$'\n--all'
     fi
+    mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")
+    return 0
+  fi
+
+  if [[ "$command_name" == "port-rename" && "${COMP_CWORD:-0}" -eq 2 ]]; then
+    candidates="$(_cli_tools_port_targets)"
+    mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")
+    return 0
+  fi
+
+  if [[ "$command_name" == "port-restart" && "${COMP_CWORD:-0}" -ge 2 ]]; then
+    candidates="$(_cli_tools_port_targets)"
     mapfile -t COMPREPLY < <(compgen -W "$candidates" -- "$cur")
     return 0
   fi

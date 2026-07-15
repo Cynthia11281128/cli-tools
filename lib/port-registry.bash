@@ -85,7 +85,13 @@ port_registry_lock() {
 }
 
 port_registry_unlock() {
+  local lock_pid=""
+
   if [[ -n "${PORT_LOCK_DIR:-}" && -d "$PORT_LOCK_DIR" ]]; then
+    if [[ -f "$PORT_LOCK_DIR/pid" ]]; then
+      IFS= read -r lock_pid <"$PORT_LOCK_DIR/pid" || lock_pid=""
+      [[ "$lock_pid" == "$$" ]] || return 0
+    fi
     rm -rf -- "$PORT_LOCK_DIR"
   fi
 }
@@ -270,6 +276,37 @@ port_registry_remove_name() {
   else
     rm -f -- "$tmp" "$PORT_REGISTRY"
   fi
+}
+
+port_registry_rename_name() {
+  local target_name="$1"
+  local new_name="$2"
+  local tmp="$PORT_REGISTRY.$$"
+  local name port pid start_time log_path command_text
+  local renamed=0
+
+  mkdir -p "$PORT_CACHE_DIR"
+  : >"$tmp"
+
+  if [[ -f "$PORT_REGISTRY" ]]; then
+    while IFS=$'\t' read -r name port pid start_time log_path command_text || [[ -n "$name" ]]; do
+      [[ -n "$name" ]] || continue
+      if [[ "$name" == "$target_name" ]]; then
+        name="$new_name"
+        renamed=1
+      fi
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$name" "$port" "$pid" "$start_time" "$log_path" "$command_text" >>"$tmp"
+    done <"$PORT_REGISTRY"
+  fi
+
+  if (( renamed )); then
+    mv "$tmp" "$PORT_REGISTRY"
+    return 0
+  fi
+
+  rm -f -- "$tmp"
+  return 1
 }
 
 port_registry_cleanup_stale() {

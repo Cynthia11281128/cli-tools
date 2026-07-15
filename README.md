@@ -145,7 +145,9 @@ Available keys:
 |---|---|---|
 | `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
 | `cli-tools port-list` | List local named port services, or use `--remote` to list services over SSH. | `cli-tools port-list --full` |
-| `cli-tools port-stop` | Stop one or more managed services by name or port, or every managed service with `--all`. | `cli-tools port-stop viewer 7860` |
+| `cli-tools port-rename` | Rename a managed service interactively, or by name/port without restarting it. | `cli-tools port-rename` |
+| `cli-tools port-restart` | Restart one or more running managed services interactively, or by name/port. | `cli-tools port-restart` |
+| `cli-tools port-stop` | Stop a managed service interactively, by name/port, or every managed service with `--all`. | `cli-tools port-stop` |
 | `cli-tools port-clear-cache` | Clear named port registry and logs when no managed port services are active. | `cli-tools port-clear-cache` |
 | `cli-tools ssh-tunnel` | Open SSH local port forwards for entered ports, or use `--all` to forward every active named remote port. | `cli-tools ssh-tunnel --all` |
 
@@ -180,6 +182,13 @@ later:
 cli-tools port-start viewer 7860 -- python server.py --port 7860
 cli-tools port-list
 cli-tools port-list --full
+cli-tools port-rename
+cli-tools port-rename viewer demo-viewer
+cli-tools port-rename 7860 viewer
+cli-tools port-restart
+cli-tools port-restart viewer
+cli-tools port-restart viewer 7860
+cli-tools port-stop
 cli-tools port-stop viewer
 cli-tools port-stop 7860
 cli-tools port-stop --all
@@ -187,9 +196,16 @@ cli-tools port-clear-cache
 ```
 
 `port-start` requires `--` before the command it should run. Names may contain
-only letters, numbers, `.`, `_`, and `-`. `port-stop` only stops services in the
-cli-tools registry; it does not kill arbitrary unregistered processes by port
-number. `port-list` output is sorted by service name.
+only letters, numbers, `.`, `_`, and `-`. `port-rename` updates only the
+cli-tools registry name; it does not restart the service, move its log file, or
+rewrite the recorded launch command. Run `port-rename` without arguments to
+choose an existing service from an interactive list. Run `port-stop` without
+arguments to choose one or more services from the same kind of list.
+`port-restart` uses the recorded command and the running process' current
+working directory, so it only restarts services that are still running.
+`port-stop` only stops services in the cli-tools registry; it does not kill
+arbitrary unregistered processes by port number. `port-list` output is sorted by
+service name.
 
 Remote port discovery uses `CLI_TOOLS_SSH_REMOTE` from `.env`:
 
