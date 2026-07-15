@@ -4,17 +4,35 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  cli-tools port-start <name> <port> -- <command> [args...]
-  port-start <name> <port> -- <command> [args...]
+  cli-tools port-start [name] [port|auto] [options] -- <command> [args...]
+  port-start [name] [port|auto] [options] -- <command> [args...]
 
 Start a long-running command in the background, name it, and remember the port.
 
 Examples:
+  cli-tools port-start -- python visualize_web/server.py --port {PORT}
+  cli-tools port-start --env grip -- env PYTHONPATH=src python server.py --port {PORT}
+  cli-tools port-start viewer -- python visualize_web/server.py --port {PORT}
+  cli-tools port-start viewer --env grip -- env PYTHONPATH=src python server.py --port {PORT}
   cli-tools port-start viewer 7860 -- python visualize_web/server.py --port 7860
   cli-tools port-start tensorboard 6006 -- tensorboard --logdir outputs --port 6006 --host 0.0.0.0
 
 Names may contain only letters, numbers, '.', '_', and '-'.
-The port must be an integer from 1 to 65535.
+When the port is omitted or set to auto, the first free port from 8000 is used.
+Use {PORT} in command arguments, or read the selected port from the PORT
+environment variable.
+
+Environment options:
+  --name NAME    Use NAME instead of prompting when the positional name is omitted.
+  --port PORT    Use PORT instead of auto-selecting a port.
+  --env ENV      Run through: conda run --no-capture-output -n ENV ...
+  --no-env       Run the command as-is.
+  --ask-env      Prompt for a conda environment.
+
+When the name is omitted in an interactive terminal, port-start prompts for it.
+With an auto port in an interactive terminal, port-start also prompts for a
+conda environment and lists available conda envs. Choose 0 to use the current
+shell.
 USAGE
 }
 
@@ -50,19 +68,256 @@ repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || {
 # shellcheck source=../lib/port-registry.bash
 source "$repo_dir/lib/port-registry.bash"
 
+port_find_available_port() {
+  local start="${1:-8000}"
+  local candidate
+
+  for ((candidate = start; candidate <= 65535; candidate++)); do
+    if port_registry_active_port_exists "$candidate"; then
+      continue
+    fi
+    if port_is_listening "$candidate"; then
+      continue
+    fi
+    printf '%s\n' "$candidate"
+    return 0
+  done
+
+  return 1
+}
+
+port_list_conda_envs() {
+  command -v conda >/dev/null 2>&1 || return 0
+
+  conda env list 2>/dev/null | awk '
+    NF && $1 !~ /^#/ {
+      if ($2 == "*") {
+        name = $1
+      } else if ($1 == "*") {
+        name = $2
+      } else {
+        name = $1
+      }
+      if (!(name in seen)) {
+        print name
+        seen[name] = 1
+      }
+    }
+  '
+}
+
+port_conda_env_exists() {
+  local target="$1"
+  local env
+
+  while IFS= read -r env; do
+    [[ "$env" == "$target" ]] && return 0
+  done < <(port_list_conda_envs)
+
+  return 1
+}
+
+port_choose_conda_env() {
+  local envs=()
+  local env choice choice_number i
+
+  if ! command -v conda >/dev/null 2>&1; then
+    port_warn "conda not found; running command in current shell"
+    return 0
+  fi
+
+  mapfile -t envs < <(port_list_conda_envs)
+  if ((${#envs[@]} == 0)); then
+    port_warn "no conda environments found; running command in current shell"
+    return 0
+  fi
+
+  printf 'Available environments:\n' >&2
+  printf '  0) none/current shell\n' >&2
+  i=1
+  for env in "${envs[@]}"; do
+    printf '  %d) %s\n' "$i" "$env" >&2
+    i=$((i + 1))
+  done
+
+  while true; do
+    printf 'Environment [0]: ' >&2
+    IFS= read -r choice || choice=""
+
+    if [[ -z "$choice" || "$choice" == "0" ]]; then
+      return 0
+    fi
+
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+      choice_number=$((10#$choice))
+      if ((choice_number >= 1 && choice_number <= ${#envs[@]})); then
+        printf '%s\n' "${envs[$((choice_number - 1))]}"
+        return 0
+      fi
+    else
+      for env in "${envs[@]}"; do
+        if [[ "$choice" == "$env" ]]; then
+          printf '%s\n' "$env"
+          return 0
+        fi
+      done
+    fi
+
+    printf 'Invalid selection: %s\n' "$choice" >&2
+  done
+}
+
+port_choose_service_name() {
+  local choice
+
+  while true; do
+    printf 'Service name: ' >&2
+    IFS= read -r choice || choice=""
+
+    if [[ -z "$choice" ]]; then
+      printf 'Name is required.\n' >&2
+      continue
+    fi
+
+    if ! [[ "$choice" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      printf "Invalid name: %s; use only letters, numbers, '.', '_', and '-'.\n" "$choice" >&2
+      continue
+    fi
+
+    if port_registry_active_name_exists "$choice"; then
+      printf 'Named port service already exists: %s\n' "$choice" >&2
+      continue
+    fi
+
+    printf '%s\n' "$choice"
+    return 0
+  done
+}
+
+port_command_has_conda_run() {
+  local previous=""
+  local arg
+
+  for arg in "$@"; do
+    if [[ "$previous" == "conda" && "$arg" == "run" ]]; then
+      return 0
+    fi
+    previous="$arg"
+  done
+
+  return 1
+}
+
+port_replace_port_placeholder() {
+  local selected_port="$1"
+  shift
+
+  local args=("$@")
+  local index
+  for index in "${!args[@]}"; do
+    args[$index]="${args[$index]//\{PORT\}/$selected_port}"
+  done
+
+  printf '%s\0' "${args[@]}"
+}
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
   exit 0
 fi
 
-if [[ "$#" -lt 4 ]]; then
+if [[ "$#" -lt 1 ]]; then
   usage >&2
-  port_die "expected <name> <port> -- <command> [args...]"
+  port_die "expected [name] [port|auto] -- <command> [args...]"
 fi
 
-name="$1"
-port="$2"
-shift 2
+name=""
+port=""
+auto_port=1
+env_mode="auto"
+env_name=""
+
+set_name() {
+  local candidate="$1"
+
+  if [[ -n "$name" && "$name" != "$candidate" ]]; then
+    port_die "service name specified more than once: $name and $candidate"
+  fi
+  name="$candidate"
+}
+
+set_port() {
+  local candidate="$1"
+
+  if [[ -n "$port" && "$port" != "$candidate" ]]; then
+    port_die "port specified more than once: $port and $candidate"
+  fi
+  port="$candidate"
+  auto_port=0
+}
+
+if [[ "${1:-}" != "--" && "${1:-}" != --* ]]; then
+  set_name "$1"
+  shift
+fi
+
+if [[ "${1:-}" != "--" && "${1:-}" != --* ]]; then
+  case "${1:-}" in
+    auto)
+      auto_port=1
+      shift
+      ;;
+    ''|*[!0-9]*)
+      usage >&2
+      port_die "invalid port: ${1:-}; use an integer, auto, or omit it"
+      ;;
+    *)
+      set_port "$1"
+      shift
+      ;;
+  esac
+fi
+
+while [[ "$#" -gt 0 && "${1:-}" != "--" ]]; do
+  case "$1" in
+    --name)
+      shift
+      [[ -n "${1:-}" ]] || port_die "missing service name after --name"
+      set_name "$1"
+      shift
+      ;;
+    --port)
+      shift
+      [[ -n "${1:-}" ]] || port_die "missing port after --port"
+      if [[ "$1" == "auto" ]]; then
+        port=""
+        auto_port=1
+      else
+        set_port "$1"
+      fi
+      shift
+      ;;
+    --env)
+      shift
+      [[ -n "${1:-}" ]] || port_die "missing environment name after --env"
+      env_mode="env"
+      env_name="$1"
+      shift
+      ;;
+    --no-env)
+      env_mode="none"
+      shift
+      ;;
+    --ask-env)
+      env_mode="ask"
+      shift
+      ;;
+    *)
+      usage >&2
+      port_die "unknown option before '--': $1"
+      ;;
+  esac
+done
 
 if [[ "${1:-}" != "--" ]]; then
   usage >&2
@@ -75,33 +330,73 @@ if [[ "$#" -eq 0 ]]; then
   port_die "missing command to run"
 fi
 
-port_validate_name "$name"
-port_validate_port "$port"
-port_validate_command "$1"
-
 port_registry_init
 port_registry_lock
 port_registry_cleanup_stale
 
-if port_registry_active_name_exists "$name"; then
-  port_die "named port service already exists: $name"
+if [[ -z "$name" ]]; then
+  if [[ -t 0 && -t 1 ]]; then
+    name="$(port_choose_service_name)"
+  else
+    port_die "missing service name; pass <name> or --name NAME"
+  fi
+else
+  port_validate_name "$name"
+  if port_registry_active_name_exists "$name"; then
+    port_die "named port service already exists: $name"
+  fi
 fi
 
-if port_registry_active_port_exists "$port"; then
-  port_die "port is already managed by cli-tools: $port"
+if ((auto_port)); then
+  port="$(port_find_available_port 8000)" ||
+    port_die "failed to find an available port from 8000 to 65535"
+else
+  port_validate_port "$port"
+
+  if port_registry_active_port_exists "$port"; then
+    port_die "port is already managed by cli-tools: $port"
+  fi
+
+  if port_is_listening "$port"; then
+    port_die "port is already listening: $port"
+  fi
 fi
 
-if port_is_listening "$port"; then
-  port_die "port is already listening: $port"
+mapfile -d '' -t command_args < <(port_replace_port_placeholder "$port" "$@")
+
+selected_env=""
+case "$env_mode" in
+  env)
+    selected_env="$env_name"
+    ;;
+  ask)
+    selected_env="$(port_choose_conda_env)"
+    ;;
+  auto)
+    if ((auto_port)) && [[ -t 0 && -t 1 ]] && ! port_command_has_conda_run "${command_args[@]}"; then
+      selected_env="$(port_choose_conda_env)"
+    fi
+    ;;
+  none)
+    ;;
+esac
+
+if [[ -n "$selected_env" ]]; then
+  command -v conda >/dev/null 2>&1 || port_die "conda not found; cannot use environment: $selected_env"
+  port_conda_env_exists "$selected_env" ||
+    port_die "conda environment not found: $selected_env"
+  command_args=(conda run --no-capture-output -n "$selected_env" "${command_args[@]}")
 fi
+
+port_validate_command "${command_args[0]}"
 
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
 start_time="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 log_path="$PORT_LOG_DIR/${name}-${port}-${timestamp}.log"
-command_text="$(port_format_command "$@")"
+command_text="$(port_format_command "${command_args[@]}")"
 
 : >"$log_path"
-setsid "$@" >>"$log_path" 2>&1 </dev/null &
+PORT="$port" setsid "${command_args[@]}" >>"$log_path" 2>&1 </dev/null &
 pid="$!"
 
 status="starting"
@@ -120,6 +415,9 @@ port_registry_append "$name" "$port" "$pid" "$start_time" "$log_path" "$command_
 
 printf 'Started named port service: %s\n' "$name"
 printf '  port: %s\n' "$port"
+if [[ -n "$selected_env" ]]; then
+  printf '  environment: %s\n' "$selected_env"
+fi
 printf '  pid: %s\n' "$pid"
 printf '  log: %s\n' "$log_path"
 

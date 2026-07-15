@@ -143,7 +143,7 @@ Available keys:
 
 | Command | Purpose | Typical use |
 |---|---|---|
-| `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start viewer 7860 -- python server.py --port 7860` |
+| `cli-tools port-start` | Start a long-running command in the background, assign it a name and port, and record its PID and log path. | `cli-tools port-start -- python server.py --port {PORT}` |
 | `cli-tools port-list` | List local named port services, or use `--remote` to list services over SSH. | `cli-tools port-list --full` |
 | `cli-tools port-rename` | Rename a managed service interactively, or by name/port without restarting it. | `cli-tools port-rename` |
 | `cli-tools port-restart` | Restart one or more running managed services interactively, or by name/port. | `cli-tools port-restart` |
@@ -179,6 +179,10 @@ Use named ports for local web services that should be easy to find and stop
 later:
 
 ```bash
+cli-tools port-start -- python server.py --port {PORT}
+cli-tools port-start --env grip -- env PYTHONPATH=src python server.py --port {PORT}
+cli-tools port-start viewer -- python server.py --port {PORT}
+cli-tools port-start viewer --env grip -- env PYTHONPATH=src python server.py --port {PORT}
 cli-tools port-start viewer 7860 -- python server.py --port 7860
 cli-tools port-list
 cli-tools port-list --full
@@ -195,14 +199,24 @@ cli-tools port-stop --all
 cli-tools port-clear-cache
 ```
 
-`port-start` requires `--` before the command it should run. Names may contain
-only letters, numbers, `.`, `_`, and `-`. `port-rename` updates only the
-cli-tools registry name; it does not restart the service, move its log file, or
-rewrite the recorded launch command. Run `port-rename` without arguments to
-choose an existing service from an interactive list. Run `port-stop` without
-arguments to choose one or more services from the same kind of list.
-`port-restart` uses the recorded command and the running process' current
-working directory, so it only restarts services that are still running.
+`port-start` requires `--` before the command it should run. If the service name
+is omitted in an interactive terminal, it asks for one. If the port is omitted
+or set to `auto`, it picks the first unused port from `8000`. Use `{PORT}` in
+command arguments, or read the selected value from the `PORT` environment
+variable. In an interactive terminal, auto-port mode asks which conda
+environment to use and lists available envs; choose `0` to run in the current
+shell. Use `--name <name>` to force a service name, `--env <name>` to force an
+environment, `--no-env` to skip environment selection, or `--ask-env` to prompt
+even when passing an explicit port. Passing an explicit positional name and
+numeric port keeps the old behavior.
+
+Names may contain only letters, numbers, `.`, `_`, and `-`. `port-rename`
+updates only the cli-tools registry name; it does not restart the service, move
+its log file, or rewrite the recorded launch command. Run `port-rename` without
+arguments to choose an existing service from an interactive list. Run
+`port-stop` without arguments to choose one or more services from the same kind
+of list. `port-restart` uses the recorded command and the running process'
+current working directory, so it only restarts services that are still running.
 `port-stop` only stops services in the cli-tools registry; it does not kill
 arbitrary unregistered processes by port number. `port-list` output is sorted by
 service name.
