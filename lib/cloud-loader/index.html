@@ -257,7 +257,7 @@
 
       .folder-group-header {
         display: grid;
-        grid-template-columns: auto auto minmax(0, 1fr);
+        grid-template-columns: auto auto minmax(0, 1fr) auto;
         gap: 8px;
         align-items: start;
       }
@@ -1050,7 +1050,15 @@
         meta.textContent = `${visibleItems.length}/${loadedItems.length} visible, ${items.length}/${group.itemIds.length} shown`;
 
         details.append(name, path, meta);
-        header.append(toggle, checkbox, details);
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "file-remove danger";
+        removeButton.textContent = "Remove";
+        removeButton.addEventListener("click", () => {
+          removeGroup(group).catch((error) => setStatus(error.message, "error"));
+        });
+
+        header.append(toggle, checkbox, details, removeButton);
         container.appendChild(header);
 
         if (group.expanded) {
@@ -1115,6 +1123,14 @@
         const payload = await postJson("/api/remove-file", { id: item.id });
         syncPlyPayload(payload);
         setStatus(`${item.name} removed`);
+      }
+
+      async function removeGroup(group) {
+        setStatus(`Removing ${group.name}...`);
+        const payload = await postJson("/api/remove-group", { id: group.id });
+        syncPlyPayload(payload);
+        const removedCount = Array.isArray(payload.removed?.items) ? payload.removed.items.length : group.itemIds.length;
+        setStatus(`${group.name} removed (${removedCount} PLY)`);
       }
 
       function loadItem(item) {

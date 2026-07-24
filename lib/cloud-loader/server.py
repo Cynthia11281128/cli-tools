@@ -55,6 +55,9 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/remove-file":
             self._handle_remove_file()
             return
+        if parsed.path == "/api/remove-group":
+            self._handle_remove_group()
+            return
         if parsed.path == "/api/clear":
             self._handle_clear()
             return
@@ -266,6 +269,27 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json_body()
             removed = remove_ply_item(self.server, payload.get("id"), payload.get("path"))
+        except FileNotFoundError as error:
+            self._send_json({"error": str(error)}, False, HTTPStatus.NOT_FOUND)
+            return
+        except ValueError as error:
+            self._send_json({"error": str(error)}, False, HTTPStatus.BAD_REQUEST)
+            return
+
+        self._send_json(
+            {
+                "status": "removed",
+                "removed": removed,
+                "files": self._current_ply_items(),
+                "groups": self._current_folder_groups(),
+            },
+            False,
+        )
+
+    def _handle_remove_group(self) -> None:
+        try:
+            payload = self._read_json_body()
+            removed = remove_folder_group(self.server, payload.get("id"), payload.get("path"))
         except FileNotFoundError as error:
             self._send_json({"error": str(error)}, False, HTTPStatus.NOT_FOUND)
             return
@@ -504,6 +528,38 @@ def remove_ply_item(server: CloudLoaderServer, item_id: Any, item_path: Any) -> 
             kept_groups.append(group)
         server.folder_groups = kept_groups
         return removed
+
+
+def remove_folder_group(server: CloudLoaderServer, group_id: Any, group_path: Any) -> dict[str, Any]:
+    if group_id is None and group_path is None:
+        raise ValueError("id or path is required")
+
+    id_value = str(group_id) if group_id is not None else None
+    path_value = str(Path(str(group_path)).expanduser().resolve()) if group_path is not None else None
+
+    with server.ply_lock:
+        remove_index = None
+        for index, group in enumerate(server.folder_groups):
+            if id_value is not None and group.get("id") == id_value:
+                remove_index = index
+                break
+            if path_value is not None and group.get("path") == path_value:
+                remove_index = index
+                break
+
+        if remove_index is None:
+            target = id_value if id_value is not None else path_value
+            raise FileNotFoundError(f"loaded folder group not found: {target}")
+
+        removed_group = dict(server.folder_groups.pop(remove_index))
+        remove_ids = set(removed_group.get("item_ids", []))
+        removed_items = [dict(item) for item in server.ply_items if item.get("id") in remove_ids]
+        server.ply_items = [item for item in server.ply_items if item.get("id") not in remove_ids]
+        removed_group["item_ids"] = list(removed_group.get("item_ids", []))
+        return {
+            "group": removed_group,
+            "items": removed_items,
+        }
 
 
 def count_direct_plys(folder_path: Path) -> int:
