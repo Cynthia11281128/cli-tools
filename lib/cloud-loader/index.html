@@ -228,7 +228,7 @@
 
       .file-row {
         display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-columns: auto minmax(0, 1fr) auto;
         gap: 8px;
         align-items: start;
         border: 1px solid var(--line);
@@ -266,6 +266,10 @@
         min-width: 28px;
         width: 28px;
         padding: 0;
+      }
+
+      .file-remove {
+        min-width: 62px;
       }
 
       .folder-group-children {
@@ -832,7 +836,25 @@
       }
 
       function syncPlyFiles(files, groups = []) {
-        for (const file of Array.isArray(files) ? files : []) {
+        const incomingFiles = Array.isArray(files) ? files : [];
+        const incomingGroups = Array.isArray(groups) ? groups : [];
+        const incomingFileIds = new Set(incomingFiles.map((file) => file?.id).filter(Boolean));
+        const incomingGroupIds = new Set(incomingGroups.map((group) => group?.id).filter(Boolean));
+
+        for (const [itemId, item] of state.items.entries()) {
+          if (incomingFileIds.has(itemId)) continue;
+          item.loadToken = ++state.loadSerial;
+          disposeItem(item);
+          state.items.delete(itemId);
+        }
+
+        for (const groupId of Array.from(state.groups.keys())) {
+          if (!incomingGroupIds.has(groupId)) {
+            state.groups.delete(groupId);
+          }
+        }
+
+        for (const file of incomingFiles) {
           if (!file || !file.id || !file.url) continue;
 
           let item = state.items.get(file.id);
@@ -862,7 +884,7 @@
           }
         }
 
-        for (const group of Array.isArray(groups) ? groups : []) {
+        for (const group of incomingGroups) {
           if (!group || !group.id || !Array.isArray(group.item_ids)) continue;
           const existing = state.groups.get(group.id);
           state.groups.set(group.id, {
@@ -874,6 +896,7 @@
             expanded: existing ? existing.expanded : true
           });
         }
+        updateVisibility(false);
         renderFileList();
       }
 
@@ -1043,7 +1066,7 @@
       }
 
       function renderFileRow(item) {
-        const row = document.createElement("label");
+        const row = document.createElement("div");
         row.className = "file-row";
         row.classList.toggle("loading", item.loading);
         row.classList.toggle("error", Boolean(item.error));
@@ -1075,8 +1098,23 @@
         meta.textContent = itemStatus(item);
 
         details.append(name, path, meta);
-        row.append(checkbox, details);
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.className = "file-remove danger";
+        removeButton.textContent = "Remove";
+        removeButton.addEventListener("click", () => {
+          removeItem(item).catch((error) => setStatus(error.message, "error"));
+        });
+
+        row.append(checkbox, details, removeButton);
         return row;
+      }
+
+      async function removeItem(item) {
+        setStatus(`Removing ${item.name}...`);
+        const payload = await postJson("/api/remove-file", { id: item.id });
+        syncPlyPayload(payload);
+        setStatus(`${item.name} removed`);
       }
 
       function loadItem(item) {

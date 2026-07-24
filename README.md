@@ -363,7 +363,8 @@ downsample value.
 Folders imported with `Add Current Folder` or `Load Path` appear as collapsible
 groups in the loaded-file side panel. Use the group checkbox to toggle all PLY
 files from that folder at once, or expand the group to control files
-individually.
+individually. Use `Remove` on a file row to unload one PLY without clearing the
+rest of the scene.
 
 Start a single-image or image-folder viewer:
 
