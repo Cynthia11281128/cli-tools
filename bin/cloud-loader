@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cli-tools cloud-loader [--start-dir DIR] [--port PORT] [--name NAME] [--host HOST]
+  cloud-loader [--start-dir DIR] [--port PORT] [--name NAME] [--host HOST]
+
+Start a browser point-cloud loader that browses files on the machine running
+this service. Use the page to repeatedly import .ply files or import a folder
+of direct child .ply files.
+
+Options:
+  --start-dir DIR  Initial server-side directory to browse. Defaults to /home/xinyuan/GRIP-Layout.
+  --port PORT      Port to use. Defaults to an automatically selected free port.
+  --name NAME      Named port service name. Defaults to cloud-loader-<port>.
+  --host HOST      Bind host for the web server. Defaults to 127.0.0.1.
+  -h, --help       Show this help.
+
+Examples:
+  cli-tools cloud-loader
+  cli-tools cloud-loader --start-dir /tmp/tmp_data
+  cli-tools cloud-loader --port 8765 --name clouds
+USAGE
+}
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+resolve_self() {
+  local source="$1"
+  local dir link
+
+  while [[ -L "$source" ]]; do
+    dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+    link="$(readlink -- "$source")" || return 1
+
+    if [[ "$link" == /* ]]; then
+      source="$link"
+    else
+      source="$dir/$link"
+    fi
+  done
+
+  dir="$(CDPATH= cd -- "$(dirname -- "$source")" && pwd)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$source")"
+}
+
+validate_port() {
+  local port="$1"
+
+  [[ "$port" =~ ^[0-9]+$ ]] ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+  (( port >= 1 && port <= 65535 )) ||
+    die "invalid port: $port; expected an integer from 1 to 65535"
+}
+
+expand_path() {
+  local path="$1"
+
+  case "$path" in
+    "~")
+      printf '%s\n' "$HOME"
+      ;;
+    "~/"*)
+      printf '%s/%s\n' "$HOME" "${path#"~/"}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+find_free_port() {
+  local host="$1"
+
+  python3 - "$host" <<'PY'
+import socket
+import sys
+
+host = sys.argv[1]
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.bind((host, 0))
+    print(sock.getsockname()[1])
+PY
+}
+
+script_path="$(resolve_self "${BASH_SOURCE[0]}")" || die "failed to resolve script path"
+bin_dir="$(dirname -- "$script_path")"
+repo_dir="$(CDPATH= cd -- "$bin_dir/.." && pwd)" || die "failed to resolve cli-tools root"
+server_path="$repo_dir/lib/cloud-loader/server.py"
+default_start_dir="/home/xinyuan/GRIP-Layout"
+
+host="127.0.0.1"
+port=""
+name=""
+name_was_set="no"
+start_dir=""
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --port)
+      [[ "$#" -ge 2 ]] || die "missing value for --port"
+      port="$2"
+      shift 2
+      ;;
+    --port=*)
+      port="${1#--port=}"
+      shift
+      ;;
+    --name)
+      [[ "$#" -ge 2 ]] || die "missing value for --name"
+      name="$2"
+      name_was_set="yes"
+      shift 2
+      ;;
+    --name=*)
+      name="${1#--name=}"
+      name_was_set="yes"
+      shift
+      ;;
+    --host)
+      [[ "$#" -ge 2 ]] || die "missing value for --host"
+      host="$2"
+      shift 2
+      ;;
+    --host=*)
+      host="${1#--host=}"
+      shift
+      ;;
+    --start-dir)
+      [[ "$#" -ge 2 ]] || die "missing value for --start-dir"
+      start_dir="$2"
+      shift 2
+      ;;
+    --start-dir=*)
+      start_dir="${1#--start-dir=}"
+      shift
+      ;;
+    --)
+      shift
+      [[ "$#" -eq 0 ]] || die "cloud-loader does not accept positional paths"
+      ;;
+    -*)
+      die "unknown option: $1"
+      ;;
+    *)
+      die "cloud-loader starts empty; import PLY files from the browser"
+      ;;
+  esac
+done
+
+require_cmd python3
+require_cmd realpath
+
+[[ -f "$server_path" ]] || die "missing cloud-loader server: $server_path"
+
+if [[ -z "$start_dir" ]]; then
+  if [[ -d "$default_start_dir" ]]; then
+    start_dir="$default_start_dir"
+  else
+    start_dir="$PWD"
+  fi
+fi
+
+expanded_start_dir="$(expand_path "$start_dir")"
+[[ -d "$expanded_start_dir" ]] || die "start directory does not exist: $expanded_start_dir"
+start_dir="$(realpath -- "$expanded_start_dir")" || die "failed to resolve start directory: $expanded_start_dir"
+
+if [[ -n "$port" ]]; then
+  validate_port "$port"
+else
+  port="$(find_free_port "$host")" || die "failed to find a free port for host: $host"
+fi
+
+if [[ "$name_was_set" == "no" && -t 0 ]]; then
+  default_name="cloud-loader-$port"
+  printf 'Service name [%s]: ' "$default_name" >&2
+  IFS= read -r name_input || die "failed to read service name"
+  if [[ -n "$name_input" ]]; then
+    name="$name_input"
+  fi
+fi
+
+if [[ -z "$name" ]]; then
+  name="cloud-loader-$port"
+fi
+
+"$bin_dir/port-start" "$name" "$port" -- \
+  python3 "$server_path" --port "$port" --host "$host" --name "$name" --start-dir "$start_dir"
+
+url_host="$host"
+if [[ "$url_host" == "0.0.0.0" || "$url_host" == "::" ]]; then
+  url_host="127.0.0.1"
+fi
+
+printf 'Cloud loader URL: http://%s:%s/\n' "$url_host" "$port"
+printf 'Start directory: %s\n' "$start_dir"
+printf 'Remote access: run cli-tools ssh-tunnel --all from your local machine.\n'

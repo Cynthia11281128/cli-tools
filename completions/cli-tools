@@ -212,6 +212,11 @@ _cli_tools_completion() {
     return 0
   fi
 
+  if [[ "$command_name" == "cloud-loader" && "${COMP_CWORD:-0}" -ge 2 ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "--start-dir --port --name --host --help" -- "$cur")
+    return 0
+  fi
+
   COMPREPLY=()
 }
 

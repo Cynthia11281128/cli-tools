@@ -46,7 +46,7 @@ Command-specific requirements:
 - `dvc` for DVC commands
 - `ssh` for remote port listing and tunnels
 - `npx` for Codex commands
-- `python3` for GLB, image, and PLY viewers
+- `python3` for GLB, image, PLY, and cloud-loader viewers
 - `python3` for video viewing; optional `cv2` for video metadata and frame previews
 - `notify-send` for desktop notifications
 
@@ -132,6 +132,7 @@ Available keys:
 
 | Command | Purpose | Typical use |
 |---|---|---|
+| `cli-tools cloud-loader` | Start a server-side PLY browser; import `.ply` files or the current folder from the machine running the service and toggle each cloud in a side panel. | `cli-tools cloud-loader` |
 | `cli-tools viewer-glb` | Start a lightweight Three.js viewer for a `.glb` file and register it as a named port service. | `cli-tools viewer-glb /path/to/model.glb` |
 | `cli-tools viewer-img` | Start a lightweight web viewer for one image or a folder of images and register it as a named port service. | `cli-tools viewer-img /path/to/images` |
 | `cli-tools viewer-img-compare` | Start a side-by-side web viewer for two image folders, with independent left and right selectors. | `cli-tools viewer-img-compare /path/to/left /path/to/right` |
@@ -337,6 +338,32 @@ Ordinary PLY folder mode reads top-level `.ply` files, shows a left side list
 for direct selection, supports top-level `.ply` symlinks, and supports
 left/right arrow key navigation.
 `--sequence` is reserved for PlanarSplatting snapshot timelines.
+
+Start a cloud loader when you want to browse and add PLY files from the machine
+running the service:
+
+```bash
+cli-tools cloud-loader
+cli-tools cloud-loader --start-dir /tmp/tmp_data
+cli-tools cloud-loader --port 8765 --name cloud-review
+```
+
+By default, the server-side picker starts from `/home/xinyuan/GRIP-Layout`.
+Pass `--start-dir` to override that for a specific launch.
+
+Use `Browse` to open a server-side picker modal. Click a directory name to
+enter it, click `Select` next to a PLY to load one file, or click
+`Add Current Folder` to import only direct child `.ply` files from the current
+server directory. The loaded-file side panel lets you toggle visibility
+independently. The picker modal and loaded-file side panel both include a
+case-insensitive text filter for matching names or paths.
+Set `Downsample` to `N` before loading to display only every Nth vertex as a
+point cloud. Use `Reload Visible` to re-load visible files with a changed
+downsample value.
+Folders imported with `Add Current Folder` or `Load Path` appear as collapsible
+groups in the loaded-file side panel. Use the group checkbox to toggle all PLY
+files from that folder at once, or expand the group to control files
+individually.
 
 Start a single-image or image-folder viewer:
 

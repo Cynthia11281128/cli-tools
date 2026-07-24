@@ -1,0 +1,1510 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cloud Loader</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111218;
+        --surface: #18191f;
+        --surface-2: #202229;
+        --line: rgba(255, 255, 255, 0.12);
+        --text: #f4f1e8;
+        --muted: #b9bdc7;
+        --accent: #83d3c5;
+        --warn: #f2b84b;
+        --sidebar-width: 320px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      #viewer {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .toolbar,
+      .loaded-panel {
+        position: fixed;
+        z-index: 2;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(24, 25, 31, 0.93);
+        backdrop-filter: blur(12px);
+      }
+
+      .toolbar {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+        display: grid;
+        grid-template-columns: auto minmax(240px, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 48px;
+        padding: 8px 10px;
+      }
+
+      .brand {
+        min-width: 0;
+        font-size: 14px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .path-control {
+        display: grid;
+        min-width: 0;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 8px;
+      }
+
+      .path-control input {
+        min-width: 0;
+      }
+
+      input,
+      button {
+        height: 30px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+      }
+
+      input {
+        padding: 0 8px;
+      }
+
+      button {
+        min-width: 56px;
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: rgba(131, 211, 197, 0.7);
+        background: rgba(131, 211, 197, 0.16);
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+
+      .toolbar-controls {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 9px;
+      }
+
+      .toggle-control,
+      .point-control,
+      .downsample-control {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .downsample-control input {
+        width: 66px;
+      }
+
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
+      input[type="range"] {
+        accent-color: var(--accent);
+      }
+
+      #pointSize {
+        width: 86px;
+      }
+
+      .status {
+        position: fixed;
+        z-index: 2;
+        right: 12px;
+        bottom: 12px;
+        left: calc(var(--sidebar-width) + 24px);
+        overflow: hidden;
+        min-height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(24, 25, 31, 0.9);
+        color: var(--muted);
+        padding: 8px 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+      }
+
+      .status.error {
+        color: var(--warn);
+      }
+
+      .loaded-panel {
+        top: 72px;
+        bottom: 12px;
+        left: 12px;
+        display: flex;
+        width: var(--sidebar-width);
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .panel-title {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .panel-subtitle {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 15px;
+        text-align: right;
+      }
+
+      .panel-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .panel-actions input {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .danger:hover {
+        border-color: rgba(255, 143, 134, 0.7);
+        background: rgba(255, 143, 134, 0.16);
+      }
+
+      .file-list {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+        gap: 8px;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .file-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 8px;
+      }
+
+      .file-row.loading {
+        border-color: rgba(131, 211, 197, 0.45);
+      }
+
+      .file-row.error {
+        border-color: rgba(242, 184, 75, 0.7);
+      }
+
+      .folder-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.045);
+        padding: 6px;
+      }
+
+      .folder-group-header {
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+      }
+
+      .group-toggle {
+        min-width: 28px;
+        width: 28px;
+        padding: 0;
+      }
+
+      .folder-group-children {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding-left: 28px;
+      }
+
+      .folder-group-children .file-row {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .file-details {
+        min-width: 0;
+      }
+
+      .file-name,
+      .file-path,
+      .file-meta {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-name {
+        font-size: 12px;
+        line-height: 16px;
+        font-weight: 650;
+      }
+
+      .file-path,
+      .file-meta {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 15px;
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 18px;
+      }
+
+      .modal[hidden] {
+        display: none;
+      }
+
+      .modal-window {
+        display: flex;
+        width: min(820px, 100%);
+        max-height: min(720px, 92vh);
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.44);
+      }
+
+      .modal-header,
+      .modal-filter,
+      .modal-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .modal-actions {
+        justify-content: flex-end;
+        border-top: 1px solid var(--line);
+        border-bottom: 0;
+      }
+
+      .modal-filter {
+        border-bottom: 1px solid var(--line);
+        padding-top: 0;
+      }
+
+      .modal-filter input {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .modal-title {
+        font-weight: 700;
+      }
+
+      .browser-path {
+        max-width: min(650px, calc(100vw - 180px));
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .browser-list {
+        min-height: 240px;
+        overflow: auto;
+        padding: 8px;
+      }
+
+      .folder-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 8px;
+        align-items: center;
+        padding: 4px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .folder-name {
+        min-width: 0;
+        text-align: left;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .folder-meta {
+        min-width: 84px;
+        color: var(--muted);
+        font-size: 12px;
+        text-align: right;
+      }
+
+      .folder-open {
+        min-width: 64px;
+      }
+
+      .browser-empty {
+        padding: 24px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 900px) {
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+
+        .path-control {
+          grid-template-columns: minmax(0, 1fr) auto auto;
+        }
+
+        .toolbar-controls {
+          justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .loaded-panel {
+          top: 160px;
+          right: 12px;
+          bottom: auto;
+          width: auto;
+          max-height: 30vh;
+        }
+
+        .status {
+          left: 12px;
+        }
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="viewer"></canvas>
+
+    <header class="toolbar">
+      <div class="brand">Cloud Loader</div>
+      <div class="path-control">
+        <input id="serverPathInput" type="text" aria-label="Server PLY file or folder">
+        <button id="browseButton" type="button">Browse</button>
+        <button id="loadPathButton" type="button">Load Path</button>
+      </div>
+      <div class="toolbar-controls">
+        <label class="toggle-control">
+          <input id="showGrid" type="checkbox">
+          Grid
+        </label>
+        <label id="verticesOnlyControl" class="toggle-control" style="visibility: hidden;">
+          <input id="verticesOnly" type="checkbox">
+          Vertices only
+        </label>
+        <label id="pointControl" class="point-control" style="visibility: hidden;">
+          Point size
+          <input id="pointSize" type="range" min="1" max="40" value="8">
+          <span id="pointSizeValue">8</span>
+        </label>
+        <label class="downsample-control">
+          Downsample
+          <input id="downsampleInput" type="number" min="1" step="1" value="1">
+        </label>
+        <button id="reloadVisible" type="button">Reload Visible</button>
+        <button id="resetView" type="button">Reset</button>
+      </div>
+    </header>
+
+    <aside class="loaded-panel">
+      <div class="panel-header">
+        <div class="panel-title">Loaded PLY files</div>
+        <div id="loadedSubtitle" class="panel-subtitle">No files loaded</div>
+      </div>
+      <div class="panel-actions">
+        <input id="loadedFilterInput" type="text" placeholder="Filter loaded PLY" aria-label="Filter loaded PLY">
+        <button id="clearFiles" class="danger" type="button">Clear</button>
+      </div>
+      <div id="fileList" class="file-list"></div>
+    </aside>
+
+    <div id="status" class="status">Loading</div>
+
+    <div id="browserModal" class="modal" hidden>
+      <div class="modal-window">
+        <div class="modal-header">
+          <div>
+            <div id="browserTitle" class="modal-title">Server PLY Files</div>
+            <div id="browserPath" class="browser-path"></div>
+          </div>
+          <button id="browserClose" type="button">Close</button>
+        </div>
+        <div class="modal-filter">
+          <input id="browserFilterInput" type="text" placeholder="Filter directories or PLY files" aria-label="Filter server browser">
+        </div>
+        <div id="browserList" class="browser-list"></div>
+        <div class="modal-actions">
+          <button id="browserOpenCurrent" type="button" disabled>Add Current Folder</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import { ArcballControls } from "three/addons/controls/ArcballControls.js";
+      import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
+
+      const els = {
+        serverPathInput: document.getElementById("serverPathInput"),
+        browseButton: document.getElementById("browseButton"),
+        loadPathButton: document.getElementById("loadPathButton"),
+        showGrid: document.getElementById("showGrid"),
+        verticesOnlyControl: document.getElementById("verticesOnlyControl"),
+        verticesOnly: document.getElementById("verticesOnly"),
+        pointControl: document.getElementById("pointControl"),
+        pointSize: document.getElementById("pointSize"),
+        pointSizeValue: document.getElementById("pointSizeValue"),
+        downsampleInput: document.getElementById("downsampleInput"),
+        reloadVisible: document.getElementById("reloadVisible"),
+        resetView: document.getElementById("resetView"),
+        clearFiles: document.getElementById("clearFiles"),
+        loadedFilterInput: document.getElementById("loadedFilterInput"),
+        loadedSubtitle: document.getElementById("loadedSubtitle"),
+        fileList: document.getElementById("fileList"),
+        status: document.getElementById("status"),
+        browserModal: document.getElementById("browserModal"),
+        browserTitle: document.getElementById("browserTitle"),
+        browserPath: document.getElementById("browserPath"),
+        browserFilterInput: document.getElementById("browserFilterInput"),
+        browserList: document.getElementById("browserList"),
+        browserClose: document.getElementById("browserClose"),
+        browserOpenCurrent: document.getElementById("browserOpenCurrent")
+      };
+
+      const state = {
+        items: new Map(),
+        groups: new Map(),
+        browserPath: "",
+        startDir: "",
+        homeDir: "",
+        browserData: null,
+        loadSerial: 0,
+        lastFrameRadius: null
+      };
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x111218);
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        canvas: document.getElementById("viewer")
+      });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const camera = new THREE.PerspectiveCamera(55, 1, 0.01, 1000);
+      const controls = new ArcballControls(camera, renderer.domElement);
+      controls.enableAnimations = true;
+      controls.enableGizmos = false;
+      controls.cursorZoom = true;
+      controls.scaleFactor = 1.12;
+      controls.rotateSpeed = 1.0;
+
+      scene.add(new THREE.HemisphereLight(0xf4f1e8, 0x30323b, 2.2));
+
+      const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
+      keyLight.position.set(3, 5, 4);
+      scene.add(keyLight);
+
+      const fillLight = new THREE.DirectionalLight(0x83d3c5, 0.7);
+      fillLight.position.set(-4, 2, -3);
+      scene.add(fillLight);
+
+      const modelRoot = new THREE.Group();
+      scene.add(modelRoot);
+
+      const grid = new THREE.GridHelper(2, 20, 0x4d5360, 0x2c3038);
+      grid.visible = false;
+      scene.add(grid);
+
+      function setStatus(message, kind = "") {
+        els.status.textContent = message;
+        els.status.classList.toggle("error", kind === "error");
+      }
+
+      function formatBytes(bytes) {
+        if (!Number.isFinite(bytes)) return "";
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let value = bytes;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+      }
+
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+          cache: "no-store",
+          ...options
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload.error || `Request failed: ${response.status}`);
+        }
+        return payload;
+      }
+
+      async function postJson(url, body) {
+        return requestJson(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+      }
+
+      function resize() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        renderer.setSize(width, height, false);
+        camera.aspect = width / Math.max(height, 1);
+        camera.updateProjectionMatrix();
+      }
+
+      function frameObject(radius) {
+        const safeRadius = Math.max(radius, 0.001);
+        const distance = safeRadius * 2.6;
+
+        camera.near = Math.max(safeRadius / 1000, 0.0001);
+        camera.far = Math.max(safeRadius * 1000, 100);
+        camera.up.set(0, 1, 0);
+        camera.position.set(distance, distance * 0.72, distance);
+
+        controls.target.set(0, 0, 0);
+        controls.minDistance = safeRadius * 0.01;
+        controls.maxDistance = safeRadius * 80;
+        controls.setCamera(camera);
+        controls.update();
+
+        grid.scale.setScalar(safeRadius);
+        grid.visible = els.showGrid.checked;
+        state.lastFrameRadius = safeRadius;
+      }
+
+      async function browseServerPath(path) {
+        const query = new URLSearchParams({ path: browseStartPath(path || els.serverPathInput.value || state.startDir || ".") });
+        const data = await requestJson(`/api/browse?${query.toString()}`);
+        state.browserPath = data.path;
+        els.browserTitle.textContent = "Server PLY Files";
+        els.browserPath.textContent = data.path;
+        els.browserOpenCurrent.disabled = !data.has_ply;
+        els.browserOpenCurrent.textContent = data.has_ply
+          ? `Add Current Folder (${data.ply_count} PLY)`
+          : "Add Current Folder";
+        state.browserData = data;
+        renderBrowserList();
+        els.browserModal.hidden = false;
+        els.browserFilterInput.focus();
+        els.browserFilterInput.select();
+        setStatus(data.has_ply ? `${data.ply_count} PLY files in current folder` : "Browsing server folders");
+      }
+
+      function browseStartPath(rawPath) {
+        const path = String(rawPath || "").trim();
+        if (path.toLowerCase().endsWith(".ply")) {
+          const slashIndex = path.lastIndexOf("/");
+          if (slashIndex > 0) return path.slice(0, slashIndex);
+          return state.startDir || ".";
+        }
+        return path || state.startDir || ".";
+      }
+
+      function filterText(value) {
+        return String(value || "").trim().toLowerCase();
+      }
+
+      function matchesFilter(item, filter) {
+        if (!filter) return true;
+        return [item.name, item.path].some((value) => String(value || "").toLowerCase().includes(filter));
+      }
+
+      function renderBrowserList() {
+        const data = state.browserData;
+        els.browserList.innerHTML = "";
+        if (!data) return;
+        if (data.parent) {
+          els.browserList.appendChild(folderRow({ name: "..", path: data.parent, ply_count: 0, has_ply: false }));
+        }
+
+        const filter = filterText(els.browserFilterInput.value);
+        const dirs = (data.dirs || []).filter((dir) => matchesFilter(dir, filter));
+        const plyFiles = (data.ply_files || []).filter((file) => matchesFilter(file, filter));
+        if (!dirs.length && !plyFiles.length && !data.parent) {
+          const empty = document.createElement("div");
+          empty.className = "browser-empty";
+          empty.textContent = filter ? "No matching subfolders or PLY files" : "No subfolders or PLY files";
+          els.browserList.appendChild(empty);
+          return;
+        }
+        if (!dirs.length && !plyFiles.length && filter) {
+          const empty = document.createElement("div");
+          empty.className = "browser-empty";
+          empty.textContent = "No matching subfolders or PLY files";
+          els.browserList.appendChild(empty);
+          return;
+        }
+
+        for (const dir of dirs) {
+          els.browserList.appendChild(folderRow(dir));
+        }
+        for (const file of plyFiles) {
+          els.browserList.appendChild(plyFileRow(file));
+        }
+      }
+
+      function folderRow(dir) {
+        const row = document.createElement("div");
+        row.className = "folder-row";
+
+        const nameButton = document.createElement("button");
+        nameButton.type = "button";
+        nameButton.className = "folder-name";
+        nameButton.textContent = dir.name;
+        nameButton.addEventListener("click", () => {
+          browseServerPath(dir.path).catch((error) => setStatus(error.message, "error"));
+        });
+        row.appendChild(nameButton);
+
+        const meta = document.createElement("span");
+        meta.className = "folder-meta";
+        meta.textContent = dir.ply_count ? `${dir.ply_count} PLY` : "";
+        row.appendChild(meta);
+
+        if (dir.has_ply) {
+          const openButton = document.createElement("button");
+          openButton.type = "button";
+          openButton.className = "folder-open";
+          openButton.textContent = "Open";
+          openButton.addEventListener("click", () => {
+            addServerFolder(dir.path)
+              .then(() => {
+                els.serverPathInput.value = dir.path;
+                els.browserModal.hidden = true;
+              })
+              .catch((error) => setStatus(error.message, "error"));
+          });
+          row.appendChild(openButton);
+        }
+
+        return row;
+      }
+
+      function plyFileRow(file) {
+        const row = document.createElement("div");
+        row.className = "folder-row";
+
+        const name = document.createElement("span");
+        name.className = "folder-name";
+        name.textContent = file.name;
+        row.appendChild(name);
+
+        const meta = document.createElement("span");
+        meta.className = "folder-meta";
+        meta.textContent = formatBytes(Number(file.size));
+        row.appendChild(meta);
+
+        const selectButton = document.createElement("button");
+        selectButton.type = "button";
+        selectButton.className = "folder-open";
+        selectButton.textContent = "Select";
+        selectButton.addEventListener("click", () => {
+          els.serverPathInput.value = file.path;
+          addServerFile(file.path)
+            .then(() => {
+              els.browserModal.hidden = true;
+            })
+            .catch((error) => setStatus(error.message, "error"));
+        });
+        row.appendChild(selectButton);
+        return row;
+      }
+
+      async function loadPathInput() {
+        const path = String(els.serverPathInput.value || "").trim();
+        if (!path) {
+          setStatus("Enter a server PLY file or folder path", "error");
+          return;
+        }
+        if (path.toLowerCase().endsWith(".ply")) {
+          await addServerFile(path);
+        } else {
+          await addServerFolder(path);
+        }
+      }
+
+      async function addServerFile(path) {
+        setStatus(`Loading ${path}...`);
+        const payload = await postJson("/api/load-file", { path });
+        syncPlyPayload(payload);
+        const label = payload.status === "existing" ? "already loaded" : "added";
+        setStatus(`${payload.item.name} ${label}`);
+      }
+
+      async function addServerFolder(path) {
+        setStatus(`Loading folder ${path}...`);
+        const payload = await postJson("/api/load-folder", { path });
+        syncPlyPayload(payload);
+        setStatus(`Folder added: ${payload.added} new, ${payload.existing} existing`);
+      }
+
+      async function refreshLoadedFiles() {
+        const payload = await requestJson("/api/ply-files");
+        syncPlyPayload(payload);
+      }
+
+      function syncPlyPayload(payload) {
+        syncPlyFiles(payload.files, payload.groups);
+      }
+
+      function syncPlyFiles(files, groups = []) {
+        for (const file of Array.isArray(files) ? files : []) {
+          if (!file || !file.id || !file.url) continue;
+
+          let item = state.items.get(file.id);
+          if (!item) {
+            item = {
+              id: file.id,
+              name: file.name || file.id,
+              path: file.path || "",
+              size: Number(file.size),
+              url: file.url,
+              visible: true,
+              loading: false,
+              loaded: false,
+              error: "",
+              sourceVertexCount: null,
+              vertexCount: null,
+              downsample: null,
+              objects: []
+            };
+            state.items.set(file.id, item);
+            loadItem(item);
+          } else {
+            item.name = file.name || item.name;
+            item.path = file.path || item.path;
+            item.size = Number(file.size);
+            item.url = file.url || item.url;
+          }
+        }
+
+        for (const group of Array.isArray(groups) ? groups : []) {
+          if (!group || !group.id || !Array.isArray(group.item_ids)) continue;
+          const existing = state.groups.get(group.id);
+          state.groups.set(group.id, {
+            id: group.id,
+            name: group.name || group.id,
+            path: group.path || "",
+            itemIds: group.item_ids.slice(),
+            count: Number(group.count || group.item_ids.length),
+            expanded: existing ? existing.expanded : true
+          });
+        }
+        renderFileList();
+      }
+
+      function itemStatus(item) {
+        const size = formatBytes(item.size);
+        if (item.error) return item.error;
+        if (item.loading) {
+          const progress = Number.isFinite(item.progress) ? ` ${item.progress}%` : "";
+          return `loading${progress}${size ? `, ${size}` : ""}`;
+        }
+        if (item.loaded) {
+          const kind = item.hasMesh ? "mesh" : "points";
+          const count = Number.isFinite(item.vertexCount)
+            ? vertexCountText(item)
+            : "loaded";
+          const downsample = item.downsample && item.downsample > 1 ? `, downsample 1:${item.downsample}` : "";
+          return `${count}, ${kind}${downsample}${size ? `, ${size}` : ""}`;
+        }
+        return `queued${size ? `, ${size}` : ""}`;
+      }
+
+      function vertexCountText(item) {
+        const vertexCount = Number(item.vertexCount);
+        const sourceCount = Number(item.sourceVertexCount);
+        if (Number.isFinite(sourceCount) && sourceCount > vertexCount) {
+          return `${vertexCount.toLocaleString()} / ${sourceCount.toLocaleString()} vertices`;
+        }
+        return `${vertexCount.toLocaleString()} vertices`;
+      }
+
+      function renderFileList() {
+        const all = Array.from(state.items.values());
+        const loaded = all.filter((item) => item.loaded).length;
+        const visible = all.filter((item) => item.loaded && item.visible).length;
+        const filter = filterText(els.loadedFilterInput.value);
+        const renderPlan = loadedRenderPlan(filter);
+        const shownCount = renderPlan.shownItemIds.size;
+        els.loadedSubtitle.textContent = all.length
+          ? `${visible}/${loaded} visible, ${shownCount}/${all.length} shown`
+          : "No files loaded";
+        els.fileList.replaceChildren();
+
+        if (!all.length) {
+          const empty = document.createElement("div");
+          empty.className = "panel-subtitle";
+          empty.textContent = "No PLY files loaded";
+          els.fileList.appendChild(empty);
+          return;
+        }
+
+        if (!shownCount) {
+          const empty = document.createElement("div");
+          empty.className = "panel-subtitle";
+          empty.textContent = "No matching loaded PLY files";
+          els.fileList.appendChild(empty);
+          return;
+        }
+
+        for (const groupPlan of renderPlan.groups) {
+          els.fileList.appendChild(renderGroup(groupPlan.group, groupPlan.items));
+        }
+
+        for (const item of renderPlan.ungrouped) {
+          els.fileList.appendChild(renderFileRow(item));
+        }
+      }
+
+      function loadedRenderPlan(filter) {
+        const groups = [];
+        const shownItemIds = new Set();
+        const groupedItemIds = new Set();
+
+        for (const group of state.groups.values()) {
+          const groupItems = group.itemIds.map((itemId) => state.items.get(itemId)).filter(Boolean);
+          for (const item of groupItems) {
+            groupedItemIds.add(item.id);
+          }
+          if (!groupItems.length) continue;
+
+          const groupMatches = matchesFilter(group, filter);
+          const shownItems = filter && !groupMatches
+            ? groupItems.filter((item) => matchesFilter(item, filter))
+            : groupItems;
+          if (!shownItems.length) continue;
+
+          for (const item of shownItems) {
+            shownItemIds.add(item.id);
+          }
+          groups.push({ group, items: shownItems });
+        }
+
+        const ungrouped = [];
+        for (const item of state.items.values()) {
+          if (groupedItemIds.has(item.id)) continue;
+          if (!matchesFilter(item, filter)) continue;
+          shownItemIds.add(item.id);
+          ungrouped.push(item);
+        }
+
+        return { groups, ungrouped, shownItemIds };
+      }
+
+      function renderGroup(group, items) {
+        const container = document.createElement("div");
+        container.className = "folder-group";
+
+        const header = document.createElement("div");
+        header.className = "folder-group-header";
+
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "group-toggle";
+        toggle.textContent = group.expanded ? "v" : ">";
+        toggle.addEventListener("click", () => {
+          group.expanded = !group.expanded;
+          renderFileList();
+        });
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        const loadedItems = items.filter((item) => item.loaded);
+        const visibleItems = loadedItems.filter((item) => item.visible);
+        checkbox.checked = loadedItems.length > 0 && visibleItems.length === loadedItems.length;
+        checkbox.indeterminate = visibleItems.length > 0 && visibleItems.length < loadedItems.length;
+        checkbox.disabled = loadedItems.length === 0;
+        checkbox.addEventListener("change", () => {
+          for (const itemId of group.itemIds) {
+            const item = state.items.get(itemId);
+            if (item && item.loaded) {
+              item.visible = checkbox.checked;
+            }
+          }
+          updateVisibility(false);
+          renderFileList();
+        });
+
+        const details = document.createElement("div");
+        details.className = "file-details";
+
+        const name = document.createElement("div");
+        name.className = "file-name";
+        name.textContent = group.name;
+
+        const path = document.createElement("div");
+        path.className = "file-path";
+        path.title = group.path || "";
+        path.textContent = group.path || "";
+
+        const meta = document.createElement("div");
+        meta.className = "file-meta";
+        meta.textContent = `${visibleItems.length}/${loadedItems.length} visible, ${items.length}/${group.itemIds.length} shown`;
+
+        details.append(name, path, meta);
+        header.append(toggle, checkbox, details);
+        container.appendChild(header);
+
+        if (group.expanded) {
+          const children = document.createElement("div");
+          children.className = "folder-group-children";
+          for (const item of items) {
+            children.appendChild(renderFileRow(item));
+          }
+          container.appendChild(children);
+        }
+
+        return container;
+      }
+
+      function renderFileRow(item) {
+        const row = document.createElement("label");
+        row.className = "file-row";
+        row.classList.toggle("loading", item.loading);
+        row.classList.toggle("error", Boolean(item.error));
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = item.visible;
+        checkbox.disabled = !item.loaded;
+        checkbox.addEventListener("change", () => {
+          item.visible = checkbox.checked;
+          updateVisibility(false);
+          renderFileList();
+        });
+
+        const details = document.createElement("div");
+        details.className = "file-details";
+
+        const name = document.createElement("div");
+        name.className = "file-name";
+        name.textContent = item.name;
+
+        const path = document.createElement("div");
+        path.className = "file-path";
+        path.title = item.path || "";
+        path.textContent = item.path || "";
+
+        const meta = document.createElement("div");
+        meta.className = "file-meta";
+        meta.textContent = itemStatus(item);
+
+        details.append(name, path, meta);
+        row.append(checkbox, details);
+        return row;
+      }
+
+      function loadItem(item) {
+        if (item.loading || item.loaded) return;
+
+        const token = ++state.loadSerial;
+        item.loadToken = token;
+        item.loading = true;
+        item.error = "";
+        renderFileList();
+        setStatus(`Loading ${item.name}`);
+
+        const loader = new PLYLoader();
+        const suffix = item.url.includes("?") ? "&" : "?";
+        loader.load(
+          `${item.url}${suffix}t=${Date.now()}`,
+          (geometry) => {
+            if (item.loadToken !== token) {
+              geometry.dispose();
+              return;
+            }
+            try {
+              installGeometry(item, geometry);
+              updateVisibility(true);
+              renderFileList();
+              setStatus(`${item.name} loaded`);
+            } catch (error) {
+              console.error(error);
+              geometry.dispose();
+              item.loading = false;
+              item.error = error.message || "Failed to display PLY";
+              updateVisibility(false);
+              renderFileList();
+              setStatus(item.error, "error");
+            }
+          },
+          (event) => {
+            if (item.loadToken !== token) return;
+            if (event.lengthComputable && event.total > 0) {
+              item.progress = Math.round((event.loaded / event.total) * 100);
+              setStatus(`Loading ${item.name} ${item.progress}%`);
+              renderFileList();
+            }
+          },
+          (error) => {
+            if (item.loadToken !== token) return;
+            console.error(error);
+            item.loading = false;
+            item.error = "Failed to load PLY";
+            updateVisibility(false);
+            renderFileList();
+            setStatus(item.error, "error");
+          }
+        );
+      }
+
+      function installGeometry(item, geometry) {
+        if (!geometry.hasAttribute("position")) {
+          throw new Error("PLY file has no vertex positions");
+        }
+
+        const downsample = parseDownsample();
+        const downsampled = downsampleGeometry(geometry, downsample);
+        if (downsampled.geometry !== geometry) {
+          geometry.dispose();
+          geometry = downsampled.geometry;
+        }
+
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        const box = geometry.boundingBox.clone();
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const radius = geometry.boundingSphere ? geometry.boundingSphere.radius : Math.max(size.x, size.y, size.z, 1);
+        const hasFaces = downsampled.downsample === 1 && Boolean(geometry.index && geometry.index.count > 0);
+        const hasColors = geometry.hasAttribute("color");
+        const vertexCount = geometry.attributes.position.count;
+        const objects = [];
+
+        if (hasFaces) {
+          geometry.computeVertexNormals();
+          const meshMaterial = new THREE.MeshStandardMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            metalness: 0.0,
+            roughness: 0.82,
+            side: THREE.DoubleSide,
+            vertexColors: hasColors
+          });
+          const mesh = new THREE.Mesh(geometry, meshMaterial);
+
+          const vertexGeometry = geometry.clone();
+          vertexGeometry.setIndex(null);
+          const basePointSize = Math.max(radius / 850, 0.0005);
+          const pointMaterial = new THREE.PointsMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            size: basePointSize * Number(els.pointSize.value),
+            sizeAttenuation: true,
+            vertexColors: hasColors
+          });
+          const points = new THREE.Points(vertexGeometry, pointMaterial);
+
+          item.mesh = mesh;
+          item.points = points;
+          item.pointMaterial = pointMaterial;
+          item.basePointSize = basePointSize;
+          item.hasMesh = true;
+          objects.push(mesh, points);
+        } else {
+          const basePointSize = Math.max(radius / 850, 0.0005);
+          const pointMaterial = new THREE.PointsMaterial({
+            color: hasColors ? 0xffffff : 0xd8dde5,
+            size: basePointSize * Number(els.pointSize.value),
+            sizeAttenuation: true,
+            vertexColors: hasColors
+          });
+          const points = new THREE.Points(geometry, pointMaterial);
+
+          item.points = points;
+          item.pointMaterial = pointMaterial;
+          item.basePointSize = basePointSize;
+          item.hasMesh = false;
+          objects.push(points);
+        }
+
+        for (const object of objects) {
+          modelRoot.add(object);
+        }
+
+        item.objects = objects;
+        item.box = box;
+        item.radius = radius;
+        item.vertexCount = vertexCount;
+        item.sourceVertexCount = downsampled.sourceVertexCount;
+        item.downsample = downsampled.downsample;
+        item.loading = false;
+        item.loaded = true;
+        item.progress = null;
+        item.error = "";
+      }
+
+      function parseDownsample() {
+        const value = Number.parseInt(els.downsampleInput.value, 10);
+        if (!Number.isFinite(value) || value < 1) {
+          els.downsampleInput.value = "1";
+          return 1;
+        }
+        const normalized = Math.floor(value);
+        els.downsampleInput.value = String(normalized);
+        return normalized;
+      }
+
+      function downsampleGeometry(geometry, step) {
+        const position = geometry.getAttribute("position");
+        const sourceVertexCount = position.count;
+        if (step <= 1 || sourceVertexCount <= 1) {
+          return {
+            geometry,
+            downsample: 1,
+            sourceVertexCount
+          };
+        }
+
+        const sampleCount = Math.ceil(sourceVertexCount / step);
+        const sampled = new THREE.BufferGeometry();
+        const positionArray = new Float32Array(sampleCount * 3);
+
+        for (let sourceIndex = 0, targetIndex = 0; sourceIndex < sourceVertexCount; sourceIndex += step, targetIndex += 1) {
+          positionArray[targetIndex * 3] = position.getX(sourceIndex);
+          positionArray[targetIndex * 3 + 1] = position.getY(sourceIndex);
+          positionArray[targetIndex * 3 + 2] = position.getZ(sourceIndex);
+        }
+        sampled.setAttribute("position", new THREE.BufferAttribute(positionArray, 3));
+
+        const color = geometry.getAttribute("color");
+        if (color) {
+          const ColorArray = color.array.constructor;
+          const colorArray = new ColorArray(sampleCount * color.itemSize);
+          for (let sourceIndex = 0, targetIndex = 0; sourceIndex < sourceVertexCount; sourceIndex += step, targetIndex += 1) {
+            for (let component = 0; component < color.itemSize; component += 1) {
+              colorArray[targetIndex * color.itemSize + component] = color.array[sourceIndex * color.itemSize + component];
+            }
+          }
+          sampled.setAttribute("color", new THREE.BufferAttribute(colorArray, color.itemSize, color.normalized));
+        }
+
+        return {
+          geometry: sampled,
+          downsample: step,
+          sourceVertexCount
+        };
+      }
+
+      function updateVisibility(frameCamera = false) {
+        const showVertices = els.verticesOnly.checked;
+        let loaded = 0;
+        let loading = 0;
+        let visibleLoaded = 0;
+        let errors = 0;
+        let hasMesh = false;
+        let hasPointCloud = false;
+
+        for (const item of state.items.values()) {
+          if (item.loading) loading += 1;
+          if (item.error) errors += 1;
+          if (!item.loaded) continue;
+
+          loaded += 1;
+          hasMesh = hasMesh || Boolean(item.hasMesh);
+          hasPointCloud = hasPointCloud || !item.hasMesh;
+          if (item.visible) visibleLoaded += 1;
+
+          if (item.mesh && item.points) {
+            item.mesh.visible = item.visible && !showVertices;
+            item.points.visible = item.visible && showVertices;
+          } else if (item.points) {
+            item.points.visible = item.visible;
+          }
+        }
+
+        els.verticesOnlyControl.style.visibility = hasMesh ? "visible" : "hidden";
+        els.pointControl.style.visibility = loaded && (showVertices || hasPointCloud) ? "visible" : "hidden";
+        if (frameCamera) {
+          frameVisible(true);
+        }
+
+        const parts = [];
+        if (loaded) parts.push(`${visibleLoaded}/${loaded} visible`);
+        if (loading) parts.push(`${loading} loading`);
+        if (errors) parts.push(`${errors} failed`);
+        if (!parts.length) parts.push("No PLY files loaded");
+        setStatus(parts.join(", "), errors > 0 ? "error" : "");
+      }
+
+      function frameVisible(frameCamera = false) {
+        const combined = new THREE.Box3();
+        let hasVisible = false;
+
+        for (const item of state.items.values()) {
+          if (!item.loaded || !item.visible || !item.box) continue;
+          combined.union(item.box);
+          hasVisible = true;
+        }
+
+        if (!hasVisible) {
+          modelRoot.position.set(0, 0, 0);
+          return;
+        }
+
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        combined.getCenter(center);
+        combined.getSize(size);
+        modelRoot.position.set(-center.x, -center.y, -center.z);
+
+        const radius = Math.max(size.length() / 2, 0.001);
+        if (frameCamera) {
+          frameObject(radius);
+        } else {
+          state.lastFrameRadius = radius;
+          grid.scale.setScalar(radius);
+          grid.visible = els.showGrid.checked;
+        }
+      }
+
+      function updatePointSize() {
+        els.pointSizeValue.textContent = els.pointSize.value;
+        for (const item of state.items.values()) {
+          if (item.pointMaterial) {
+            item.pointMaterial.size = item.basePointSize * Number(els.pointSize.value);
+          }
+        }
+      }
+
+      function disposeItem(item) {
+        const geometries = new Set();
+        const materials = new Set();
+
+        for (const object of item.objects || []) {
+          modelRoot.remove(object);
+          if (object.geometry && !geometries.has(object.geometry)) {
+            object.geometry.dispose();
+            geometries.add(object.geometry);
+          }
+          if (object.material && !materials.has(object.material)) {
+            object.material.dispose();
+            materials.add(object.material);
+          }
+        }
+        item.objects = [];
+        item.mesh = null;
+        item.points = null;
+        item.pointMaterial = null;
+        item.basePointSize = null;
+        item.box = null;
+        item.radius = null;
+      }
+
+      function resetItemForReload(item) {
+        item.loadToken = ++state.loadSerial;
+        disposeItem(item);
+        item.loading = false;
+        item.loaded = false;
+        item.error = "";
+        item.progress = null;
+        item.sourceVertexCount = null;
+        item.vertexCount = null;
+        item.downsample = null;
+        item.hasMesh = false;
+      }
+
+      function reloadVisibleItems() {
+        const targets = Array.from(state.items.values()).filter((item) => item.visible);
+        if (!targets.length) {
+          setStatus("No visible PLY files to reload", "error");
+          return;
+        }
+        parseDownsample();
+        for (const item of targets) {
+          resetItemForReload(item);
+          loadItem(item);
+        }
+        updateVisibility(false);
+        renderFileList();
+      }
+
+      async function clearAll() {
+        try {
+          await postJson("/api/clear", {});
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message || "Failed to clear server PLY list", "error");
+          return;
+        }
+
+        for (const item of state.items.values()) {
+          item.loadToken = ++state.loadSerial;
+          disposeItem(item);
+        }
+        state.items.clear();
+        state.groups.clear();
+        modelRoot.position.set(0, 0, 0);
+        state.lastFrameRadius = null;
+        els.verticesOnly.checked = false;
+        renderFileList();
+        updateVisibility(false);
+      }
+
+      async function init() {
+        try {
+          const meta = await requestJson("/meta.json");
+          state.startDir = meta.start_dir || ".";
+          state.homeDir = meta.home_dir || "";
+          els.serverPathInput.value = state.startDir;
+          await refreshLoadedFiles();
+          setStatus("Ready");
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message || "Failed to initialize", "error");
+        }
+
+        resize();
+        frameObject(1);
+        grid.visible = false;
+        renderFileList();
+        animate();
+      }
+
+      els.browseButton.addEventListener("click", () => {
+        browseServerPath(els.serverPathInput.value).catch((error) => setStatus(error.message, "error"));
+      });
+      els.loadPathButton.addEventListener("click", () => {
+        loadPathInput().catch((error) => setStatus(error.message, "error"));
+      });
+      els.serverPathInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          loadPathInput().catch((error) => setStatus(error.message, "error"));
+        }
+      });
+      els.browserClose.addEventListener("click", () => {
+        els.browserModal.hidden = true;
+      });
+      els.browserFilterInput.addEventListener("input", renderBrowserList);
+      els.browserFilterInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          els.browserFilterInput.value = "";
+          renderBrowserList();
+        }
+      });
+      els.browserOpenCurrent.addEventListener("click", () => {
+        if (!state.browserPath) return;
+        addServerFolder(state.browserPath)
+          .then(() => {
+            els.serverPathInput.value = state.browserPath;
+            els.browserModal.hidden = true;
+          })
+          .catch((error) => setStatus(error.message, "error"));
+      });
+      els.browserModal.addEventListener("click", (event) => {
+        if (event.target === els.browserModal) {
+          els.browserModal.hidden = true;
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !els.browserModal.hidden) {
+          els.browserModal.hidden = true;
+        }
+      });
+      els.clearFiles.addEventListener("click", clearAll);
+      els.loadedFilterInput.addEventListener("input", renderFileList);
+      els.reloadVisible.addEventListener("click", reloadVisibleItems);
+      els.resetView.addEventListener("click", () => {
+        if (state.lastFrameRadius) frameObject(state.lastFrameRadius);
+      });
+      els.showGrid.addEventListener("change", () => {
+        grid.visible = els.showGrid.checked;
+      });
+      els.verticesOnly.addEventListener("change", () => updateVisibility(false));
+      els.pointSize.addEventListener("input", updatePointSize);
+      els.downsampleInput.addEventListener("change", parseDownsample);
+      window.addEventListener("resize", resize);
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      init();
+    </script>
+  </body>
+</html>
