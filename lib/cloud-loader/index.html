@@ -34,6 +34,11 @@
         letter-spacing: 0;
       }
 
+      body.resizing-sidebar {
+        cursor: ew-resize;
+        user-select: none;
+      }
+
       #viewer {
         display: block;
         width: 100vw;
@@ -181,6 +186,45 @@
         padding: 10px;
       }
 
+      .panel-resize-handle {
+        position: absolute;
+        top: 0;
+        right: -5px;
+        bottom: 0;
+        width: 10px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        cursor: ew-resize;
+        min-width: 0;
+        padding: 0;
+        touch-action: none;
+      }
+
+      .panel-resize-handle::after {
+        position: absolute;
+        top: 10px;
+        right: 4px;
+        bottom: 10px;
+        width: 2px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.16);
+        content: "";
+        opacity: 0;
+        transition: opacity 120ms ease;
+      }
+
+      .panel-resize-handle:hover::after,
+      .panel-resize-handle:focus-visible::after,
+      body.resizing-sidebar .panel-resize-handle::after {
+        opacity: 1;
+      }
+
+      .panel-resize-handle:hover {
+        border-color: transparent;
+        background: transparent;
+      }
+
       .panel-header {
         display: flex;
         align-items: baseline;
@@ -288,7 +332,6 @@
       }
 
       .file-name,
-      .file-path,
       .file-meta {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -306,6 +349,11 @@
         color: var(--muted);
         font-size: 11px;
         line-height: 15px;
+      }
+
+      .file-path {
+        overflow-wrap: anywhere;
+        white-space: normal;
       }
 
       .modal {
@@ -437,6 +485,10 @@
           max-height: 30vh;
         }
 
+        .panel-resize-handle {
+          display: none;
+        }
+
         .status {
           left: 12px;
         }
@@ -494,6 +546,7 @@
         <button id="clearFiles" class="danger" type="button">Clear</button>
       </div>
       <div id="fileList" class="file-list"></div>
+      <button id="panelResizeHandle" class="panel-resize-handle" type="button" aria-label="Resize loaded PLY panel" title="Resize panel"></button>
     </aside>
 
     <div id="status" class="status">Loading</div>
@@ -539,6 +592,7 @@
         loadedFilterInput: document.getElementById("loadedFilterInput"),
         loadedSubtitle: document.getElementById("loadedSubtitle"),
         fileList: document.getElementById("fileList"),
+        panelResizeHandle: document.getElementById("panelResizeHandle"),
         status: document.getElementById("status"),
         browserModal: document.getElementById("browserModal"),
         browserTitle: document.getElementById("browserTitle"),
@@ -557,8 +611,17 @@
         homeDir: "",
         browserData: null,
         loadSerial: 0,
-        lastFrameRadius: null
+        lastFrameRadius: null,
+        sidebarResize: null
       };
+
+      const sidebarWidthConfig = {
+        min: 240,
+        max: 640,
+        storageKey: "cloud-loader-sidebar-width"
+      };
+
+      const lastFolderStorageKey = "cloud-loader-last-folder";
 
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(0x111218);
@@ -640,6 +703,103 @@
         camera.updateProjectionMatrix();
       }
 
+      function isCompactLayout() {
+        return window.matchMedia("(max-width: 900px)").matches;
+      }
+
+      function currentSidebarWidth() {
+        const value = getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width");
+        return Number.parseFloat(value) || 320;
+      }
+
+      function clampSidebarWidth(width) {
+        const max = Math.max(
+          sidebarWidthConfig.min,
+          Math.min(sidebarWidthConfig.max, window.innerWidth - 260)
+        );
+        return Math.max(sidebarWidthConfig.min, Math.min(max, Math.round(width)));
+      }
+
+      function setSidebarWidth(width, persist = true) {
+        const clamped = clampSidebarWidth(width);
+        document.documentElement.style.setProperty("--sidebar-width", `${clamped}px`);
+        if (persist) {
+          try {
+            window.localStorage.setItem(sidebarWidthConfig.storageKey, String(clamped));
+          } catch {
+            // Local storage can be unavailable in restricted browser contexts.
+          }
+        }
+        resize();
+        return clamped;
+      }
+
+      function restoreSidebarWidth() {
+        try {
+          const stored = Number.parseFloat(window.localStorage.getItem(sidebarWidthConfig.storageKey));
+          if (Number.isFinite(stored)) {
+            setSidebarWidth(stored, false);
+          }
+        } catch {
+          return;
+        }
+      }
+
+      function lastFolderPath() {
+        try {
+          return window.localStorage.getItem(lastFolderStorageKey) || "";
+        } catch {
+          return "";
+        }
+      }
+
+      function rememberLastFolder(path) {
+        const folder = String(path || "").trim();
+        if (!folder) return;
+        try {
+          window.localStorage.setItem(lastFolderStorageKey, folder);
+        } catch {
+          return;
+        }
+      }
+
+      function parentFolder(path) {
+        const value = String(path || "").trim();
+        const slashIndex = value.lastIndexOf("/");
+        if (slashIndex > 0) return value.slice(0, slashIndex);
+        return state.startDir || ".";
+      }
+
+      function startSidebarResize(event) {
+        if (event.button !== 0 || isCompactLayout()) return;
+        state.sidebarResize = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startWidth: currentSidebarWidth()
+        };
+        document.body.classList.add("resizing-sidebar");
+        els.panelResizeHandle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      }
+
+      function moveSidebarResize(event) {
+        const drag = state.sidebarResize;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        setSidebarWidth(drag.startWidth + event.clientX - drag.startX);
+        event.preventDefault();
+      }
+
+      function stopSidebarResize(event) {
+        const drag = state.sidebarResize;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        state.sidebarResize = null;
+        document.body.classList.remove("resizing-sidebar");
+        if (els.panelResizeHandle.hasPointerCapture(event.pointerId)) {
+          els.panelResizeHandle.releasePointerCapture(event.pointerId);
+        }
+        event.preventDefault();
+      }
+
       function frameObject(radius) {
         const safeRadius = Math.max(radius, 0.001);
         const distance = safeRadius * 2.6;
@@ -664,6 +824,8 @@
         const query = new URLSearchParams({ path: browseStartPath(path || els.serverPathInput.value || state.startDir || ".") });
         const data = await requestJson(`/api/browse?${query.toString()}`);
         state.browserPath = data.path;
+        els.serverPathInput.value = data.path;
+        rememberLastFolder(data.path);
         els.browserTitle.textContent = "Server PLY Files";
         els.browserPath.textContent = data.path;
         els.browserOpenCurrent.disabled = !data.has_ply;
@@ -757,7 +919,6 @@
           openButton.addEventListener("click", () => {
             addServerFolder(dir.path)
               .then(() => {
-                els.serverPathInput.value = dir.path;
                 els.browserModal.hidden = true;
               })
               .catch((error) => setStatus(error.message, "error"));
@@ -787,7 +948,6 @@
         selectButton.className = "folder-open";
         selectButton.textContent = "Select";
         selectButton.addEventListener("click", () => {
-          els.serverPathInput.value = file.path;
           addServerFile(file.path)
             .then(() => {
               els.browserModal.hidden = true;
@@ -815,6 +975,9 @@
         setStatus(`Loading ${path}...`);
         const payload = await postJson("/api/load-file", { path });
         syncPlyPayload(payload);
+        const displayPath = payload.item?.path || path;
+        els.serverPathInput.value = displayPath;
+        rememberLastFolder(parentFolder(displayPath));
         const label = payload.status === "existing" ? "already loaded" : "added";
         setStatus(`${payload.item.name} ${label}`);
       }
@@ -823,6 +986,9 @@
         setStatus(`Loading folder ${path}...`);
         const payload = await postJson("/api/load-folder", { path });
         syncPlyPayload(payload);
+        const displayPath = payload.group?.path || payload.folder || path;
+        els.serverPathInput.value = displayPath;
+        rememberLastFolder(displayPath);
         setStatus(`Folder added: ${payload.added} new, ${payload.existing} existing`);
       }
 
@@ -893,7 +1059,7 @@
             path: group.path || "",
             itemIds: group.item_ids.slice(),
             count: Number(group.count || group.item_ids.length),
-            expanded: existing ? existing.expanded : true
+            expanded: existing ? existing.expanded : false
           });
         }
         updateVisibility(false);
@@ -956,7 +1122,7 @@
         }
 
         for (const groupPlan of renderPlan.groups) {
-          els.fileList.appendChild(renderGroup(groupPlan.group, groupPlan.items));
+          els.fileList.appendChild(renderGroup(groupPlan.group, groupPlan.items, groupPlan.shownItems));
         }
 
         for (const item of renderPlan.ungrouped) {
@@ -985,7 +1151,7 @@
           for (const item of shownItems) {
             shownItemIds.add(item.id);
           }
-          groups.push({ group, items: shownItems });
+          groups.push({ group, items: groupItems, shownItems });
         }
 
         const ungrouped = [];
@@ -999,7 +1165,7 @@
         return { groups, ungrouped, shownItemIds };
       }
 
-      function renderGroup(group, items) {
+      function renderGroup(group, items, shownItems) {
         const container = document.createElement("div");
         container.className = "folder-group";
 
@@ -1010,6 +1176,7 @@
         toggle.type = "button";
         toggle.className = "group-toggle";
         toggle.textContent = group.expanded ? "v" : ">";
+        toggle.title = group.expanded ? "Hide PLY files" : "Show PLY files";
         toggle.addEventListener("click", () => {
           group.expanded = !group.expanded;
           renderFileList();
@@ -1047,7 +1214,8 @@
 
         const meta = document.createElement("div");
         meta.className = "file-meta";
-        meta.textContent = `${visibleItems.length}/${loadedItems.length} visible, ${items.length}/${group.itemIds.length} shown`;
+        const shownCount = shownItems ? shownItems.length : items.length;
+        meta.textContent = `${visibleItems.length}/${loadedItems.length} visible, ${shownCount}/${group.itemIds.length} matched`;
 
         details.append(name, path, meta);
         const removeButton = document.createElement("button");
@@ -1064,7 +1232,7 @@
         if (group.expanded) {
           const children = document.createElement("div");
           children.className = "folder-group-children";
-          for (const item of items) {
+          for (const item of shownItems || items) {
             children.appendChild(renderFileRow(item));
           }
           container.appendChild(children);
@@ -1483,7 +1651,7 @@
           const meta = await requestJson("/meta.json");
           state.startDir = meta.start_dir || ".";
           state.homeDir = meta.home_dir || "";
-          els.serverPathInput.value = state.startDir;
+          els.serverPathInput.value = lastFolderPath() || state.startDir;
           await refreshLoadedFiles();
           setStatus("Ready");
         } catch (error) {
@@ -1492,6 +1660,7 @@
         }
 
         resize();
+        restoreSidebarWidth();
         frameObject(1);
         grid.visible = false;
         renderFileList();
@@ -1550,6 +1719,10 @@
       els.verticesOnly.addEventListener("change", () => updateVisibility(false));
       els.pointSize.addEventListener("input", updatePointSize);
       els.downsampleInput.addEventListener("change", parseDownsample);
+      els.panelResizeHandle.addEventListener("pointerdown", startSidebarResize);
+      window.addEventListener("pointermove", moveSidebarResize);
+      window.addEventListener("pointerup", stopSidebarResize);
+      window.addEventListener("pointercancel", stopSidebarResize);
       window.addEventListener("resize", resize);
 
       function animate() {

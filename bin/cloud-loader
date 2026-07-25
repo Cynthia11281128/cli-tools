@@ -78,6 +78,15 @@ expand_path() {
   esac
 }
 
+absolute_display_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+
+print(os.path.abspath(os.path.expandvars(os.path.expanduser(sys.argv[1]))))
+PY
+}
+
 find_free_port() {
   local host="$1"
 
@@ -162,7 +171,6 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 require_cmd python3
-require_cmd realpath
 
 [[ -f "$server_path" ]] || die "missing cloud-loader server: $server_path"
 
@@ -176,7 +184,7 @@ fi
 
 expanded_start_dir="$(expand_path "$start_dir")"
 [[ -d "$expanded_start_dir" ]] || die "start directory does not exist: $expanded_start_dir"
-start_dir="$(realpath -- "$expanded_start_dir")" || die "failed to resolve start directory: $expanded_start_dir"
+start_dir="$(absolute_display_path "$expanded_start_dir")" || die "failed to normalize start directory: $expanded_start_dir"
 
 if [[ -n "$port" ]]; then
   validate_port "$port"

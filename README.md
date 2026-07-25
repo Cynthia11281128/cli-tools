@@ -354,18 +354,22 @@ Pass `--start-dir` to override that for a specific launch.
 Use `Browse` to open a server-side picker modal. Click a directory name to
 enter it, click `Select` next to a PLY to load one file, or click
 `Add Current Folder` to import only direct child `.ply` files from the current
-server directory. The loaded-file side panel lets you toggle visibility
-independently. The picker modal and loaded-file side panel both include a
-case-insensitive text filter for matching names or paths.
+server directory. Symlink paths are preserved in the picker, path input, and
+loaded-file panel. The page remembers the last browsed or loaded folder in the
+browser and uses it the next time the same service URL is opened. The
+loaded-file side panel lets you toggle visibility independently. The picker
+modal and loaded-file side panel both include a case-insensitive text filter
+for matching names or paths. Drag the side panel's right edge to resize the
+loaded-file panel.
 Set `Downsample` to `N` before loading to display only every Nth vertex as a
 point cloud. Use `Reload Visible` to re-load visible files with a changed
 downsample value.
-Folders imported with `Add Current Folder` or `Load Path` appear as collapsible
-groups in the loaded-file side panel. Use the group checkbox to toggle all PLY
-files from that folder at once, or expand the group to control files
-individually. Use `Remove` on a group header to unload the whole folder import,
-or `Remove` on a file row to unload one PLY without clearing the rest of the
-scene.
+Folders imported with `Add Current Folder` or `Load Path` appear as one
+collapsed folder row in the loaded-file side panel. Use the folder checkbox to
+toggle all PLY files from that folder at once, expand the row to toggle
+individual PLY files, or use `Remove` on the folder row to unload the whole
+folder import. Single-file imports still appear as individual rows with their
+own visibility and remove controls.
 
 Start a single-image or image-folder viewer:
 

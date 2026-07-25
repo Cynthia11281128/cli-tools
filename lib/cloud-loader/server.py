@@ -13,7 +13,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qsl, quote, unquote, urlparse
 
 
 CHUNK_SIZE = 1024 * 1024
@@ -109,16 +109,16 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         }
 
     def _browse_payload(self, requested_path: str) -> dict[str, Any]:
-        path = resolve_browser_path(self.server.start_dir, requested_path)
-        if not path.exists():
-            raise FileNotFoundError(f"path does not exist: {path}")
-        if not path.is_dir():
-            raise NotADirectoryError(f"path is not a directory: {path}")
+        display_path = normalize_browser_path(self.server.start_dir, requested_path)
+        if not display_path.exists():
+            raise FileNotFoundError(f"path does not exist: {display_path}")
+        if not display_path.is_dir():
+            raise NotADirectoryError(f"path is not a directory: {display_path}")
 
         entries: list[dict[str, Any]] = []
         dirs: list[dict[str, Any]] = []
         ply_files: list[dict[str, Any]] = []
-        with os.scandir(path) as scandir:
+        with os.scandir(display_path) as scandir:
             for entry in scandir:
                 try:
                     is_dir = entry.is_dir(follow_symlinks=True)
@@ -137,7 +137,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                 entries.append(
                     {
                         "name": entry.name,
-                        "path": str(Path(entry.path).resolve()),
+                        "path": str(Path(entry.path)),
                         "type": "directory" if is_dir else "ply",
                         "size": stat.st_size if stat is not None and is_file else None,
                         "mtime": stat.st_mtime if stat is not None else None,
@@ -146,7 +146,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                 )
 
                 if is_dir:
-                    child_path = Path(entry.path).resolve()
+                    child_path = Path(entry.path)
                     try:
                         child_ply_count = count_direct_plys(child_path)
                     except OSError:
@@ -161,7 +161,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                         }
                     )
                 else:
-                    target_path = Path(entry.path).resolve()
+                    target_path = Path(entry.path)
                     ply_files.append(
                         {
                             "name": entry.name,
@@ -174,9 +174,9 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         entries.sort(key=lambda item: (0 if item["type"] == "directory" else 1, natural_name_key(item["name"])))
         dirs.sort(key=lambda item: natural_name_key(item["name"]))
         ply_files.sort(key=lambda item: natural_name_key(item["name"]))
-        parent = path.parent if path.parent != path else None
+        parent = display_path.parent if display_path.parent != display_path else None
         return {
-            "path": str(path),
+            "path": str(display_path),
             "parent": str(parent) if parent is not None else None,
             "home": str(self.server.home_dir),
             "cwd": str(self.server.start_dir),
@@ -196,17 +196,11 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
 
     def _current_ply_items(self) -> list[dict[str, Any]]:
         with self.server.ply_lock:
-            return [dict(item) for item in self.server.ply_items]
+            return [public_ply_item(item) for item in self.server.ply_items]
 
     def _current_folder_groups(self) -> list[dict[str, Any]]:
         with self.server.ply_lock:
-            return [
-                {
-                    **group,
-                    "item_ids": list(group.get("item_ids", [])),
-                }
-                for group in self.server.folder_groups
-            ]
+            return [public_folder_group(group) for group in self.server.folder_groups]
 
     def _handle_load_file(self) -> None:
         try:
@@ -226,7 +220,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         self._send_json(
             {
                 "status": "added" if created else "existing",
-                "item": item,
+                "item": public_ply_item(item),
                 "files": self._current_ply_items(),
                 "groups": self._current_folder_groups(),
             },
@@ -236,7 +230,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
     def _handle_load_folder(self) -> None:
         try:
             payload = self._read_json_body()
-            folder_path = resolve_browser_path(self.server.start_dir, payload.get("path"))
+            folder_path = normalize_browser_path(self.server.start_dir, payload.get("path"))
             items, group, added, existing = register_folder_plys(self.server, folder_path)
         except FileNotFoundError as error:
             self._send_json({"error": str(error)}, False, HTTPStatus.NOT_FOUND)
@@ -257,8 +251,8 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                 "added": added,
                 "existing": existing,
                 "folder": str(folder_path),
-                "group": group,
-                "items": items,
+                "group": public_folder_group(group),
+                "items": [public_ply_item(item) for item in items],
                 "files": self._current_ply_items(),
                 "groups": self._current_folder_groups(),
             },
@@ -279,7 +273,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         self._send_json(
             {
                 "status": "removed",
-                "removed": removed,
+                "removed": public_ply_item(removed),
                 "files": self._current_ply_items(),
                 "groups": self._current_folder_groups(),
             },
@@ -300,7 +294,10 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
         self._send_json(
             {
                 "status": "removed",
-                "removed": removed,
+                "removed": {
+                    "group": public_folder_group(removed["group"]),
+                    "items": [public_ply_item(item) for item in removed["items"]],
+                },
                 "files": self._current_ply_items(),
                 "groups": self._current_folder_groups(),
             },
@@ -347,7 +344,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "file not found")
             return
 
-        self._send_file(Path(item["path"]), "application/octet-stream", head_only)
+        self._send_file(Path(item.get("real_path") or item["path"]), "application/octet-stream", head_only)
 
     def _send_json(self, payload: dict[str, Any], head_only: bool, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -387,18 +384,10 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
 
 
 def parse_query(query: str) -> dict[str, str]:
-    result: dict[str, str] = {}
-    if not query:
-        return result
-    for part in query.split("&"):
-        if not part:
-            continue
-        key, _, value = part.partition("=")
-        result[unquote(key)] = unquote(value)
-    return result
+    return dict(parse_qsl(query, keep_blank_values=True))
 
 
-def resolve_browser_path(start_dir: Path, value: Any) -> Path:
+def normalize_browser_path(start_dir: Path, value: Any) -> Path:
     if value is None or value == "":
         return start_dir
     if not isinstance(value, str):
@@ -407,11 +396,15 @@ def resolve_browser_path(start_dir: Path, value: Any) -> Path:
     expanded = Path(os.path.expandvars(value)).expanduser()
     if not expanded.is_absolute():
         expanded = start_dir / expanded
-    return expanded.resolve()
+    return Path(os.path.abspath(os.fspath(expanded)))
+
+
+def real_path(path: Path) -> Path:
+    return path.resolve()
 
 
 def resolve_ply_file(start_dir: Path, value: Any) -> Path:
-    path = resolve_browser_path(start_dir, value)
+    path = normalize_browser_path(start_dir, value)
     if path.suffix.lower() != ".ply":
         raise ValueError(f"expected a .ply file: {path}")
     if not path.is_file():
@@ -419,26 +412,51 @@ def resolve_ply_file(start_dir: Path, value: Any) -> Path:
     return path
 
 
-def ply_item_payload(item_id: str, path: Path) -> dict[str, Any]:
+def public_ply_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item["id"],
+        "name": item["name"],
+        "path": item["path"],
+        "size": item["size"],
+        "url": item["url"],
+    }
+
+
+def public_folder_group(group: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": group["id"],
+        "name": group["name"],
+        "path": group["path"],
+        "item_ids": list(group.get("item_ids", [])),
+        "count": group["count"],
+    }
+
+
+def ply_item_payload(item_id: str, display_path: Path, resolved_path: Path) -> dict[str, Any]:
     return {
         "id": item_id,
-        "name": path.name,
-        "path": str(path),
-        "size": path.stat().st_size,
+        "name": display_path.name,
+        "path": str(display_path),
+        "real_path": str(resolved_path),
+        "size": resolved_path.stat().st_size,
         "url": f"/models/{quote(item_id, safe='')}.ply",
     }
 
 
 def register_ply_path(server: CloudLoaderServer, path: Path) -> tuple[dict[str, Any], bool]:
-    resolved = path.resolve()
+    resolved = real_path(path)
     with server.ply_lock:
         for item in server.ply_items:
-            if item["path"] == str(resolved):
+            if item.get("real_path", item["path"]) == str(resolved):
+                item["name"] = path.name
+                item["path"] = str(path)
+                item["real_path"] = str(resolved)
+                item["size"] = resolved.stat().st_size
                 return dict(item), False
 
         item_id = f"ply-{server.next_ply_id}"
         server.next_ply_id += 1
-        item = ply_item_payload(item_id, resolved)
+        item = ply_item_payload(item_id, path, resolved)
         server.ply_items.append(item)
         return dict(item), True
 
@@ -470,14 +488,17 @@ def register_folder_plys(server: CloudLoaderServer, folder_path: Path) -> tuple[
 
 
 def register_folder_group(server: CloudLoaderServer, folder_path: Path, item_ids: list[str]) -> dict[str, Any]:
-    resolved = folder_path.resolve()
+    resolved = real_path(folder_path)
     with server.ply_lock:
         for group in server.folder_groups:
-            if group["path"] == str(resolved):
+            if group.get("real_path", group["path"]) == str(resolved):
                 existing_ids = list(group.get("item_ids", []))
                 for item_id in item_ids:
                     if item_id not in existing_ids:
                         existing_ids.append(item_id)
+                group["name"] = folder_path.name or str(folder_path)
+                group["path"] = str(folder_path)
+                group["real_path"] = str(resolved)
                 group["item_ids"] = existing_ids
                 group["count"] = len(existing_ids)
                 return dict(group)
@@ -486,8 +507,9 @@ def register_folder_group(server: CloudLoaderServer, folder_path: Path, item_ids
         server.next_group_id += 1
         group = {
             "id": group_id,
-            "name": resolved.name or str(resolved),
-            "path": str(resolved),
+            "name": folder_path.name or str(folder_path),
+            "path": str(folder_path),
+            "real_path": str(resolved),
             "item_ids": list(item_ids),
             "count": len(item_ids),
         }
@@ -500,7 +522,9 @@ def remove_ply_item(server: CloudLoaderServer, item_id: Any, item_path: Any) -> 
         raise ValueError("id or path is required")
 
     id_value = str(item_id) if item_id is not None else None
-    path_value = str(Path(str(item_path)).expanduser().resolve()) if item_path is not None else None
+    display_path = normalize_browser_path(server.start_dir, item_path) if item_path is not None else None
+    path_value = str(display_path) if display_path is not None else None
+    real_value = str(real_path(display_path)) if display_path is not None else None
 
     with server.ply_lock:
         remove_index = None
@@ -509,6 +533,9 @@ def remove_ply_item(server: CloudLoaderServer, item_id: Any, item_path: Any) -> 
                 remove_index = index
                 break
             if path_value is not None and item.get("path") == path_value:
+                remove_index = index
+                break
+            if real_value is not None and item.get("real_path", item.get("path")) == real_value:
                 remove_index = index
                 break
 
@@ -535,7 +562,9 @@ def remove_folder_group(server: CloudLoaderServer, group_id: Any, group_path: An
         raise ValueError("id or path is required")
 
     id_value = str(group_id) if group_id is not None else None
-    path_value = str(Path(str(group_path)).expanduser().resolve()) if group_path is not None else None
+    display_path = normalize_browser_path(server.start_dir, group_path) if group_path is not None else None
+    path_value = str(display_path) if display_path is not None else None
+    real_value = str(real_path(display_path)) if display_path is not None else None
 
     with server.ply_lock:
         remove_index = None
@@ -544,6 +573,9 @@ def remove_folder_group(server: CloudLoaderServer, group_id: Any, group_path: An
                 remove_index = index
                 break
             if path_value is not None and group.get("path") == path_value:
+                remove_index = index
+                break
+            if real_value is not None and group.get("real_path", group.get("path")) == real_value:
                 remove_index = index
                 break
 
@@ -588,7 +620,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    start_dir = Path(args.start_dir).expanduser().resolve()
+    start_dir = normalize_browser_path(Path.cwd(), args.start_dir)
     if not start_dir.is_dir():
         print(f"error: start directory does not exist: {start_dir}", file=sys.stderr)
         return 2
@@ -602,7 +634,7 @@ def main() -> int:
     server.index_path = index_path
     server.viewer_name = args.name or f"cloud-loader-{args.port}"
     server.start_dir = start_dir
-    server.home_dir = Path.home().resolve()
+    server.home_dir = Path.home()
     server.ply_items = []
     server.folder_groups = []
     server.ply_lock = threading.Lock()
