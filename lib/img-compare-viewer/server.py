@@ -164,18 +164,12 @@ def is_supported_image(path: Path) -> bool:
 
 
 def collect_folder_images(folder_path: Path) -> list[Path]:
-    root = folder_path.resolve()
     images: list[Path] = []
 
     for path in folder_path.iterdir():
         if not path.is_file() or not is_supported_image(path):
             continue
-        resolved = path.resolve()
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            continue
-        images.append(resolved)
+        images.append(path)
 
     return sorted(images, key=natural_key)
 

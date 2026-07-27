@@ -355,12 +355,17 @@ Use `Browse` to open a server-side picker modal. Click a directory name to
 enter it, click `Select` next to a PLY to load one file, or click
 `Add Current Folder` to import only direct child `.ply` files from the current
 server directory. Symlink paths are preserved in the picker, path input, and
-loaded-file panel. The page remembers the last browsed or loaded folder in the
+loaded-file panel. Symlinked PLY files are recognized even when the symlink
+name itself does not end in `.ply`, as long as the symlink target is a PLY file.
+The page remembers the last browsed or loaded folder in the
 browser and uses it the next time the same service URL is opened. The
 loaded-file side panel lets you toggle visibility independently. The picker
 modal and loaded-file side panel both include a case-insensitive text filter
 for matching names or paths. Drag the side panel's right edge to resize the
-loaded-file panel.
+loaded-file panel. The viewer's Three.js files are served by the cloud-loader
+service, so the browser does not need CDN access. The display path uses the
+same fallback shape as `region_reverse_viewer`: Three.js first, raw WebGL1 if
+Three.js cannot create a renderer, then a Canvas 2D camera-projection fallback.
 Set `Downsample` to `N` before loading to display only every Nth vertex as a
 point cloud. Use `Reload Visible` to re-load visible files with a changed
 downsample value.
@@ -393,7 +398,8 @@ cli-tools viewer-img-compare /path/to/pred /path/to/gt
 cli-tools viewer-img-compare /path/to/a /path/to/b --port 8765 --name img-compare
 ```
 
-Image compare mode reads supported images from the top level of each folder.
+Image compare mode reads supported images and top-level image symlinks from
+each folder.
 The left and right panels switch independently: use the list buttons, `A`/`D`
 for the left side, and left/right arrow keys for the right side.
 

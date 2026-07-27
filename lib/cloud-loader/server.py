@@ -24,6 +24,7 @@ class CloudLoaderServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
     index_path: Path
+    vendor_root: Path
     viewer_name: str
     start_dir: Path
     home_dir: Path
@@ -69,6 +70,10 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
 
         if path in {"/", "/index.html"}:
             self._send_file(self.server.index_path, "text/html; charset=utf-8", head_only)
+            return
+
+        if path.startswith("/vendor/"):
+            self._send_vendor_file(path[len("/vendor/") :], head_only)
             return
 
         if path == "/meta.json":
@@ -126,7 +131,9 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                 except OSError:
                     continue
 
-                if not is_dir and not (is_file and entry.name.lower().endswith(".ply")):
+                entry_path = Path(entry.path)
+                is_ply = is_file and is_ply_file(entry_path)
+                if not is_dir and not is_ply:
                     continue
 
                 try:
@@ -146,7 +153,7 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                 )
 
                 if is_dir:
-                    child_path = Path(entry.path)
+                    child_path = entry_path
                     try:
                         child_ply_count = count_direct_plys(child_path)
                     except OSError:
@@ -161,12 +168,11 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
                         }
                     )
                 else:
-                    target_path = Path(entry.path)
                     ply_files.append(
                         {
                             "name": entry.name,
-                            "path": str(target_path),
-                            "size": stat.st_size if stat is not None else target_path.stat().st_size,
+                            "path": str(entry_path),
+                            "size": stat.st_size if stat is not None else entry_path.stat().st_size,
                             "is_symlink": entry.is_symlink(),
                         }
                     )
@@ -346,6 +352,24 @@ class CloudLoaderHandler(BaseHTTPRequestHandler):
 
         self._send_file(Path(item.get("real_path") or item["path"]), "application/octet-stream", head_only)
 
+    def _send_vendor_file(self, rel_url: str, head_only: bool) -> None:
+        rel_path = Path(unquote(rel_url))
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            self.send_error(HTTPStatus.BAD_REQUEST, "invalid vendor path")
+            return
+
+        path = self.server.vendor_root / rel_path
+        if not path.is_file():
+            self.send_error(HTTPStatus.NOT_FOUND, "file not found")
+            return
+
+        content_type = "application/octet-stream"
+        if path.suffix == ".js":
+            content_type = "application/javascript; charset=utf-8"
+        elif path.name == "LICENSE" or path.suffix in {".txt", ".md"}:
+            content_type = "text/plain; charset=utf-8"
+        self._send_file(path, content_type, head_only)
+
     def _send_json(self, payload: dict[str, Any], head_only: bool, status: HTTPStatus = HTTPStatus.OK) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
         self.send_response(status)
@@ -405,10 +429,10 @@ def real_path(path: Path) -> Path:
 
 def resolve_ply_file(start_dir: Path, value: Any) -> Path:
     path = normalize_browser_path(start_dir, value)
-    if path.suffix.lower() != ".ply":
-        raise ValueError(f"expected a .ply file: {path}")
     if not path.is_file():
         raise FileNotFoundError(f"PLY file does not exist: {path}")
+    if not is_ply_file(path):
+        raise ValueError(f"expected a .ply file: {path}")
     return path
 
 
@@ -467,7 +491,7 @@ def register_folder_plys(server: CloudLoaderServer, folder_path: Path) -> tuple[
     if not folder_path.is_dir():
         raise NotADirectoryError(f"path is not a directory: {folder_path}")
 
-    plys = [path for path in folder_path.iterdir() if path.is_file() and path.suffix.lower() == ".ply"]
+    plys = [path for path in folder_path.iterdir() if is_ply_file(path)]
     plys.sort(key=lambda path: natural_name_key(path.name))
     if not plys:
         raise ValueError(f"folder has no direct .ply files: {folder_path}")
@@ -595,7 +619,18 @@ def remove_folder_group(server: CloudLoaderServer, group_id: Any, group_path: An
 
 
 def count_direct_plys(folder_path: Path) -> int:
-    return sum(1 for path in folder_path.iterdir() if path.is_file() and path.suffix.lower() == ".ply")
+    return sum(1 for path in folder_path.iterdir() if is_ply_file(path))
+
+
+def is_ply_file(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if path.suffix.lower() == ".ply":
+        return True
+    try:
+        return path.resolve().suffix.lower() == ".ply"
+    except OSError:
+        return False
 
 
 def natural_name_key(name: str) -> list[Any]:
@@ -632,6 +667,7 @@ def main() -> int:
 
     server = CloudLoaderServer((args.host, args.port), CloudLoaderHandler)
     server.index_path = index_path
+    server.vendor_root = index_path.with_name("vendor")
     server.viewer_name = args.name or f"cloud-loader-{args.port}"
     server.start_dir = start_dir
     server.home_dir = Path.home()
