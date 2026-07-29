@@ -73,21 +73,26 @@
       }
 
       .title {
-        overflow: hidden;
         color: var(--text);
         font-size: 14px;
         font-weight: 650;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
       }
 
-      .count,
-      .path {
+      .count {
         overflow: hidden;
         color: var(--muted);
         font-size: 12px;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+
+      .path {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
       }
 
       .image-list {
@@ -333,9 +338,12 @@
       function installSide(sideName, payload) {
         const side = sides[sideName];
         side.images = payload.images || [];
-        side.title.textContent = sideName === "left" ? `Left: ${payload.name || "Images"}` : `Right: ${payload.name || "Images"}`;
+        const folderName = payload.display_name || payload.path || payload.name || "Images";
+        side.title.textContent = sideName === "left" ? `Left: ${folderName}` : `Right: ${folderName}`;
+        side.title.title = folderName;
         side.count.textContent = `${side.images.length} images`;
         side.path.textContent = payload.path || "";
+        side.path.title = payload.path || "";
         renderList(sideName);
 
         if (!side.images.length) {

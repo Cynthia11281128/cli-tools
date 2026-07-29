@@ -399,7 +399,7 @@ cli-tools viewer-img-compare /path/to/a /path/to/b --port 8765 --name img-compar
 ```
 
 Image compare mode reads supported images and top-level image symlinks from
-each folder.
+each folder. The side panel headers show the full folder paths.
 The left and right panels switch independently: use the list buttons, `A`/`D`
 for the left side, and left/right arrow keys for the right side.
 

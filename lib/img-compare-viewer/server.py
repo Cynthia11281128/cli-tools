@@ -137,6 +137,7 @@ def folder_payload(side: str, folder_path: Path, images: list[Path]) -> dict[str
     return {
         "path": str(folder_path),
         "name": folder_path.name,
+        "display_name": str(folder_path),
         "count": len(images),
         "images": [
             image_item(path, f"/{side}/" + quote(path.name, safe=""))

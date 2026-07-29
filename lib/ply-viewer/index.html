@@ -210,6 +210,86 @@
         line-height: 15px;
       }
 
+      .panel-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+
+      .panel-actions button {
+        min-width: 0;
+      }
+
+      .layer-controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+
+      .layer-controls label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .color-controls {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+
+      .color-controls label {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .color-controls select {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .confidence-threshold {
+        display: none;
+        grid-template-columns: 1fr auto;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .confidence-threshold.active {
+        display: grid;
+      }
+
+      .confidence-threshold input[type="range"] {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .confidence-threshold button {
+        min-width: 46px;
+      }
+
+      .confidence-percent {
+        display: none;
+        grid-template-columns: 1fr;
+        gap: 3px;
+      }
+
+      .confidence-percent.active {
+        display: grid;
+      }
+
+      .confidence-percent input[type="range"] {
+        width: 100%;
+        min-width: 0;
+      }
+
       .ply-list {
         display: flex;
         min-height: 0;
@@ -242,6 +322,10 @@
         text-align: left;
       }
 
+      .ply-row.multi-row {
+        grid-template-columns: auto 1fr;
+      }
+
       .ply-row.folder-row:hover {
         border-color: rgba(131, 211, 197, 0.52);
         background: rgba(131, 211, 197, 0.12);
@@ -250,6 +334,11 @@
       .ply-row.folder-row.active {
         border-color: rgba(131, 211, 197, 0.82);
         background: rgba(131, 211, 197, 0.18);
+      }
+
+      .ply-row.multi-row.active {
+        border-color: rgba(242, 216, 75, 0.95);
+        background: rgba(242, 216, 75, 0.16);
       }
 
       .ply-row.loading {
@@ -396,6 +485,42 @@
         <div class="panel-title">PLY files</div>
         <div id="plyPanelSubtitle" class="panel-subtitle">Waiting for files</div>
       </div>
+      <div id="plyPanelActions" class="panel-actions">
+        <button id="showAllPly" type="button">Show all</button>
+        <button id="hideAllPly" type="button">Hide all</button>
+      </div>
+      <div id="plyLayerControls" class="layer-controls">
+        <label>
+          <input id="showRgbLayer" type="checkbox" checked>
+          RGB
+        </label>
+        <label>
+          <input id="showRegionLayer" type="checkbox" checked>
+          Regions
+        </label>
+        <label>
+          <input id="showRectangleLayer" type="checkbox" checked>
+          Rectangles
+        </label>
+      </div>
+      <div id="plyColorControls" class="color-controls">
+        <label>
+          Color
+          <select id="colorSource">
+            <option value="original" selected>Original</option>
+            <option value="confidenceRaw">Raw confidence</option>
+          </select>
+        </label>
+        <div id="confidenceThresholdControl" class="confidence-threshold">
+          <input id="confidenceThreshold" type="range" min="0" max="1" value="0" step="0.01">
+          <button id="resetConfidenceThreshold" type="button">Reset</button>
+        </div>
+        <div id="confidencePercentControl" class="confidence-percent">
+          <input id="confidencePercentThreshold" type="range" min="0" max="100" value="0" step="1">
+          <div id="confidencePercentLabel" class="panel-subtitle">drop lowest 0% per frame</div>
+        </div>
+        <div id="confidenceRange" class="panel-subtitle"></div>
+      </div>
       <div id="plyList" class="ply-list"></div>
     </aside>
 
@@ -471,6 +596,19 @@
       const previewImage = document.getElementById("previewImage");
       const plyPanel = document.getElementById("plyPanel");
       const plyPanelSubtitle = document.getElementById("plyPanelSubtitle");
+      const showAllPly = document.getElementById("showAllPly");
+      const hideAllPly = document.getElementById("hideAllPly");
+      const showRgbLayer = document.getElementById("showRgbLayer");
+      const showRegionLayer = document.getElementById("showRegionLayer");
+      const showRectangleLayer = document.getElementById("showRectangleLayer");
+      const colorSource = document.getElementById("colorSource");
+      const confidenceThresholdControl = document.getElementById("confidenceThresholdControl");
+      const confidenceThreshold = document.getElementById("confidenceThreshold");
+      const resetConfidenceThreshold = document.getElementById("resetConfidenceThreshold");
+      const confidencePercentControl = document.getElementById("confidencePercentControl");
+      const confidencePercentThreshold = document.getElementById("confidencePercentThreshold");
+      const confidencePercentLabel = document.getElementById("confidencePercentLabel");
+      const confidenceRange = document.getElementById("confidenceRange");
       const plyList = document.getElementById("plyList");
 
       const scene = new THREE.Scene();
@@ -520,6 +658,14 @@
       let folderItems = [];
       let currentFolderIndex = 0;
       let multiItems = new Map();
+      let multiGroups = new Map();
+      let orderedMultiStems = [];
+      let selectedMultiStem = "";
+      let multiColorMode = "original";
+      let confidenceRawRange = { min: Infinity, max: -Infinity, count: 0, files: 0 };
+      let confidenceRawThreshold = -Infinity;
+      let confidencePercentThresholdValue = 0;
+      let colorApplyTimer = null;
       let multiPollTimer = null;
       let sequence = null;
       let frames = [];
@@ -597,6 +743,7 @@
             item.pointMaterial.size = item.basePointSize * Number(pointSize.value);
           }
         }
+        updateMultiHighlight();
       }
 
       function updateGridVisibility() {
@@ -729,9 +876,17 @@
         }
       }
 
+      function createPlyLoader() {
+        const loader = new PLYLoader();
+        loader.setCustomPropertyNameMapping({
+          confidenceRaw: ["confidence_raw"]
+        });
+        return loader;
+      }
+
       function loadGeometry(url, options = {}) {
         const token = ++loadToken;
-        const loader = new PLYLoader();
+        const loader = createPlyLoader();
         const suffix = url.includes("?") ? "&" : "?";
         loader.load(
           `${url}${suffix}t=${Date.now()}`,
@@ -848,21 +1003,21 @@
       }
 
       async function loadFolder(meta) {
-        mode = "folder";
-        document.body.classList.add("folder-mode");
+        mode = "multi";
+        document.body.classList.add("multi-mode");
         plyPanel.setAttribute("aria-hidden", "false");
 
         const displayName = meta.name || "PLY Folder";
         document.title = `${displayName} - PLY Viewer`;
         fileName.textContent = displayName;
+        setStatus("Loading PLY files");
 
         folderItems = Array.isArray(meta.files) ? meta.files : [];
         currentFolderIndex = 0;
-        renderFolderList();
         if (!folderItems.length) {
           throw new Error("No PLY files found");
         }
-        loadFolderItem(0, true);
+        syncPlyFiles({ files: folderItems });
       }
 
       async function fetchPlyFiles() {
@@ -873,12 +1028,145 @@
         return response.json();
       }
 
-      function renderPlyList() {
-        const items = Array.from(multiItems.values());
-        plyPanelSubtitle.textContent = `${items.length} file${items.length === 1 ? "" : "s"}`;
+      function inferPlyLayer(file) {
+        const name = String((file && file.name) || "").toLowerCase();
+        if (name.endsWith("_rgb_world.ply") || name.endsWith("_rgb.ply") || name.includes("_rgb_")) {
+          return "rgb";
+        }
+        if (name.endsWith("_window_rectangles.ply") || name.includes("_rectangles") || name.includes("_rectangle")) {
+          return "rectangles";
+        }
+        if (name.endsWith("_window_plane.ply") || name.includes("_regions") || name.includes("_region")) {
+          return "regions";
+        }
+        return "other";
+      }
+
+      function inferPlyStem(file) {
+        const name = String((file && (file.name || file.id)) || "").replace(/\.ply$/i, "");
+        const stripped = name.replace(/(_rgb_world|_window_rectangles|_window_plane|_rgb|_rectangles|_rectangle|_regions|_region)$/i, "");
+        return stripped || name || "unknown";
+      }
+
+      function layerSortRank(layer) {
+        if (layer === "rgb") {
+          return 0;
+        }
+        if (layer === "regions") {
+          return 1;
+        }
+        if (layer === "rectangles") {
+          return 2;
+        }
+        return 3;
+      }
+
+      function rebuildMultiGroups() {
+        const groups = new Map();
+        for (const item of multiItems.values()) {
+          const stem = item.stem || item.id;
+          let group = groups.get(stem);
+          if (!group) {
+            group = { stem, items: [] };
+            groups.set(stem, group);
+          }
+          group.items.push(item);
+        }
+
+        for (const group of groups.values()) {
+          group.items.sort((a, b) => {
+            const layerDiff = layerSortRank(a.layer) - layerSortRank(b.layer);
+            return layerDiff || String(a.name || a.id).localeCompare(String(b.name || b.id));
+          });
+        }
+
+        multiGroups = groups;
+        orderedMultiStems = Array.from(groups.keys());
+        if (selectedMultiStem && !multiGroups.has(selectedMultiStem)) {
+          selectedMultiStem = "";
+        }
+        if (!selectedMultiStem && orderedMultiStems.length) {
+          selectedMultiStem = orderedMultiStems[0];
+        }
+        return groups;
+      }
+
+      function multiSelectionStatus() {
+        if (!selectedMultiStem || !orderedMultiStems.length) {
+          return "";
+        }
+        const index = orderedMultiStems.indexOf(selectedMultiStem);
+        if (index < 0) {
+          return "";
+        }
+        return `selected ${index + 1}/${orderedMultiStems.length} ${selectedMultiStem}`;
+      }
+
+      function setMultiGroupVisibility(group, visible) {
+        for (const item of group.items) {
+          item.visible = visible;
+        }
+        updateMultiVisibility(false);
+        renderPlyList();
+      }
+
+      function selectMultiStem(stem, options = {}) {
+        if (mode !== "multi") {
+          return;
+        }
+        rebuildMultiGroups();
+        if (!orderedMultiStems.length) {
+          selectedMultiStem = "";
+          return;
+        }
+        selectedMultiStem = multiGroups.has(stem) ? stem : orderedMultiStems[0];
+        updateMultiVisibility(false);
+        renderPlyList({ scrollSelected: Boolean(options.scrollSelected) });
+      }
+
+      function selectAdjacentMultiStem(direction) {
+        if (mode !== "multi") {
+          return;
+        }
+        rebuildMultiGroups();
+        if (!orderedMultiStems.length) {
+          return;
+        }
+        const current = orderedMultiStems.indexOf(selectedMultiStem);
+        const index = current >= 0 ? current : 0;
+        const next = (index + direction + orderedMultiStems.length) % orderedMultiStems.length;
+        selectMultiStem(orderedMultiStems[next], { scrollSelected: true });
+      }
+
+      function multiGroupStatus(group) {
+        const loaded = group.items.filter((item) => item.loaded).length;
+        const loading = group.items.filter((item) => item.loading).length;
+        const errors = group.items.filter((item) => item.error).length;
+        const visible = group.items.filter((item) => item.visible).length;
+        const layers = [...new Set(group.items.map((item) => layerName(item.layer)).filter(Boolean))];
+        const label = layers.length ? layers.join(" + ") : `${group.items.length} PLY`;
+        const parts = [`${label}`, `${visible}/${group.items.length} on`];
+        if (loaded) {
+          parts.push(`${loaded}/${group.items.length} loaded`);
+        }
+        if (loading) {
+          parts.push(`${loading} loading`);
+        }
+        if (errors) {
+          parts.push(`${errors} failed`);
+        }
+        return parts.join(", ");
+      }
+
+      function renderPlyList(options = {}) {
+        const previousScrollTop = plyList.scrollTop;
+        const groups = rebuildMultiGroups();
+        const groupList = Array.from(groups.values());
+        const fileCount = multiItems.size;
+        plyPanelSubtitle.textContent = `${groupList.length} frame${groupList.length === 1 ? "" : "s"}, ${fileCount} file${fileCount === 1 ? "" : "s"}`;
         plyList.replaceChildren();
 
-        if (!items.length) {
+        if (!groupList.length) {
           const empty = document.createElement("div");
           empty.className = "panel-subtitle";
           empty.textContent = "No PLY files";
@@ -886,94 +1174,160 @@
           return;
         }
 
-        for (const item of items) {
-          const row = document.createElement("label");
-          row.className = "ply-row";
-          if (item.loading) {
+        for (const group of groupList) {
+          const row = document.createElement("div");
+          row.className = "ply-row folder-row multi-row";
+          row.tabIndex = 0;
+          row.setAttribute("role", "button");
+          row.classList.toggle("active", group.stem === selectedMultiStem);
+          if (group.items.some((item) => item.loading)) {
             row.classList.add("loading");
           }
-          if (item.error) {
+          if (group.items.some((item) => item.error)) {
             row.classList.add("error");
           }
+          row.addEventListener("click", () => selectMultiStem(group.stem));
+          row.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              selectMultiStem(group.stem);
+            }
+          });
 
+          const visibleCount = group.items.filter((item) => item.visible).length;
           const checkbox = document.createElement("input");
           checkbox.type = "checkbox";
-          checkbox.checked = item.visible;
-          checkbox.addEventListener("change", () => {
-            item.visible = checkbox.checked;
-            updateMultiVisibility(false);
-            renderPlyList();
-          });
+          checkbox.checked = visibleCount === group.items.length;
+          checkbox.indeterminate = visibleCount > 0 && visibleCount < group.items.length;
+          checkbox.addEventListener("click", (event) => event.stopPropagation());
+          checkbox.addEventListener("change", () => setMultiGroupVisibility(group, checkbox.checked));
 
           const details = document.createElement("div");
           details.className = "ply-details";
 
           const name = document.createElement("div");
           name.className = "ply-name";
-          name.textContent = item.name || item.id;
+          name.textContent = group.stem;
 
           const path = document.createElement("div");
           path.className = "ply-path";
-          path.title = item.path || "";
-          path.textContent = item.path || "";
+          const files = group.items.map((item) => item.name || item.id).join(" + ");
+          path.title = group.items.map((item) => item.path || item.name || item.id).join("\n");
+          path.textContent = files;
 
           const meta = document.createElement("div");
           meta.className = "ply-meta";
-          meta.textContent = multiItemStatus(item);
+          meta.textContent = multiGroupStatus(group);
 
           details.append(name, path, meta);
           row.append(checkbox, details);
           plyList.appendChild(row);
         }
+
+        if (options.scrollSelected) {
+          const active = plyList.querySelector(".multi-row.active");
+          if (active) {
+            active.scrollIntoView({ block: "nearest" });
+          }
+        } else {
+          plyList.scrollTop = previousScrollTop;
+        }
+      }
+
+      function layerName(layer) {
+        if (layer === "rgb") {
+          return "RGB";
+        }
+        if (layer === "regions") {
+          return "Regions";
+        }
+        if (layer === "rectangles") {
+          return "Rectangles";
+        }
+        return "";
+      }
+
+      function isMultiItemDisplayed(item) {
+        if (!item.visible) {
+          return false;
+        }
+        if (item.layer === "rgb") {
+          return showRgbLayer.checked;
+        }
+        if (item.layer === "regions") {
+          return showRegionLayer.checked;
+        }
+        if (item.layer === "rectangles") {
+          return showRectangleLayer.checked;
+        }
+        return true;
       }
 
       function multiItemStatus(item) {
         const size = formatBytes(item.size);
+        const layer = layerName(item.layer);
+        const prefix = layer ? `${layer}, ` : "";
         if (item.error) {
           return item.error;
         }
         if (item.loading) {
           const progress = Number.isFinite(item.progress) ? ` ${item.progress}%` : "";
-          return `loading${progress}${size ? `, ${size}` : ""}`;
+          return `${prefix}loading${progress}${size ? `, ${size}` : ""}`;
         }
         if (item.loaded) {
           const kind = item.hasMesh ? "mesh" : "points";
           const count = Number.isFinite(item.vertexCount) ? `${item.vertexCount.toLocaleString()} vertices` : "loaded";
-          return `${count}, ${kind}${size ? `, ${size}` : ""}`;
+          return `${prefix}${count}, ${kind}${size ? `, ${size}` : ""}`;
         }
-        return `queued${size ? `, ${size}` : ""}`;
+        return `${prefix}queued${size ? `, ${size}` : ""}`;
       }
 
       function syncPlyFiles(payload) {
         const files = Array.isArray(payload.files) ? payload.files : [];
         for (const file of files) {
-          if (!file || !file.id || !file.url) {
+          const id = file && (file.id || file.name || file.url);
+          if (!file || !id || !file.url) {
             continue;
           }
 
-          let item = multiItems.get(file.id);
+          let item = multiItems.get(id);
           if (!item) {
             item = {
-              id: file.id,
-              name: file.name || file.id,
+              id,
+              name: file.name || id,
               path: file.path || "",
               size: Number(file.size),
               url: file.url,
+              stem: inferPlyStem(file),
+              layer: inferPlyLayer(file),
               visible: true,
               loading: false,
               loaded: false,
               error: "",
               objects: []
             };
-            multiItems.set(file.id, item);
+            multiItems.set(id, item);
             loadMultiItem(item);
           } else {
             item.name = file.name || item.name;
             item.path = file.path || item.path;
             item.size = Number(file.size);
             item.url = file.url || item.url;
+            item.stem = inferPlyStem(file);
+            item.layer = inferPlyLayer(file);
           }
         }
+        renderPlyList();
+      }
+
+      function setAllMultiVisibility(visible) {
+        if (mode !== "multi" || !multiItems.size) {
+          return;
+        }
+        for (const item of multiItems.values()) {
+          item.visible = visible;
+        }
+        updateMultiVisibility(false);
         renderPlyList();
       }
 
@@ -986,7 +1340,7 @@
         item.error = "";
         renderPlyList();
 
-        const loader = new PLYLoader();
+        const loader = createPlyLoader();
         const suffix = item.url.includes("?") ? "&" : "?";
         loader.load(
           `${item.url}${suffix}t=${Date.now()}`,
@@ -1019,6 +1373,440 @@
             setStatus(item.error, true);
           }
         );
+      }
+
+      function itemMaterials(item) {
+        const materials = [];
+        for (const object of item.objects || []) {
+          const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+          for (const material of objectMaterials) {
+            if (material) {
+              materials.push(material);
+            }
+          }
+        }
+        return materials;
+      }
+
+      function itemGeometries(item) {
+        const geometries = [];
+        const seen = new Set();
+        for (const object of item.objects || []) {
+          const geometry = object.geometry;
+          if (geometry && !seen.has(geometry.uuid)) {
+            geometries.push(geometry);
+            seen.add(geometry.uuid);
+          }
+        }
+        return geometries;
+      }
+
+      function rememberMultiGeometryStates(item) {
+        item.geometryStates = new Map();
+        for (const geometry of itemGeometries(item)) {
+          const position = geometry.getAttribute("position");
+          const color = geometry.getAttribute("color");
+          const confidenceRaw = geometry.getAttribute("confidenceRaw");
+          item.geometryStates.set(geometry.uuid, {
+            position: position ? position.array.slice(0) : null,
+            positionItemSize: position ? position.itemSize : 3,
+            color: color ? color.array.slice(0) : null,
+            colorItemSize: color ? color.itemSize : 3,
+            confidenceRaw: confidenceRaw ? confidenceRaw.array.slice(0) : null,
+            confidenceRawItemSize: confidenceRaw ? confidenceRaw.itemSize : 1,
+            originalCount: position ? position.count : 0,
+            indexed: Boolean(geometry.index)
+          });
+        }
+      }
+
+      function rememberMultiMaterialStates(item) {
+        item.materialStates = new Map();
+        for (const material of itemMaterials(item)) {
+          item.materialStates.set(material.uuid, {
+            color: material.color ? material.color.clone() : null,
+            vertexColors: Boolean(material.vertexColors),
+            size: Number.isFinite(material.size) ? Number(material.size) : null
+          });
+        }
+      }
+
+      function computeConfidenceRawStats(item, geometry) {
+        const attribute = geometry.getAttribute("confidenceRaw");
+        if (!attribute || !attribute.array) {
+          item.confidenceRawStats = null;
+          return;
+        }
+        let min = Infinity;
+        let max = -Infinity;
+        let count = 0;
+        for (const value of attribute.array) {
+          if (!Number.isFinite(value)) {
+            continue;
+          }
+          min = Math.min(min, value);
+          max = Math.max(max, value);
+          count += 1;
+        }
+        item.confidenceRawStats = count ? { min, max, count } : null;
+      }
+
+      function recomputeConfidenceRawRange() {
+        let min = Infinity;
+        let max = -Infinity;
+        let count = 0;
+        let files = 0;
+        for (const item of multiItems.values()) {
+          const stats = item.confidenceRawStats;
+          if (!stats || !stats.count) {
+            continue;
+          }
+          min = Math.min(min, stats.min);
+          max = Math.max(max, stats.max);
+          count += stats.count;
+          files += 1;
+        }
+        confidenceRawRange = { min, max, count, files };
+        updateConfidenceRangeLabel();
+        syncConfidenceThresholdControl();
+      }
+
+      function confidencePercentLabelText() {
+        return `drop lowest ${confidencePercentThresholdValue.toFixed(0)}% per frame`;
+      }
+
+      function updateConfidencePercentLabel() {
+        confidencePercentControl.classList.toggle("active", Boolean(confidenceRawRange.count));
+        confidencePercentThreshold.disabled = !confidenceRawRange.count;
+        confidencePercentLabel.textContent = confidencePercentLabelText();
+      }
+
+      function getFrameConfidenceValues(stem) {
+        const group = multiGroups.get(stem);
+        if (!group) {
+          return null;
+        }
+        if (group.confidenceValues) {
+          return group.confidenceValues;
+        }
+        let total = 0;
+        for (const item of group.items) {
+          for (const state of (item.geometryStates ? item.geometryStates.values() : [])) {
+            if (state.confidenceRaw) {
+              total += state.originalCount;
+            }
+          }
+        }
+        if (!total) {
+          group.confidenceValues = new Float32Array(0);
+          return group.confidenceValues;
+        }
+
+        const values = new Float32Array(total);
+        let offset = 0;
+        for (const item of group.items) {
+          for (const state of (item.geometryStates ? item.geometryStates.values() : [])) {
+            if (!state.confidenceRaw) {
+              continue;
+            }
+            for (let index = 0; index < state.originalCount; index += 1) {
+              const value = state.confidenceRaw[index * state.confidenceRawItemSize];
+              if (Number.isFinite(value)) {
+                values[offset] = value;
+                offset += 1;
+              }
+            }
+          }
+        }
+        const finite = values.slice(0, offset);
+        finite.sort();
+        group.confidenceValues = finite;
+        return group.confidenceValues;
+      }
+
+      function confidencePercentCutoff(stem) {
+        if (!confidenceRawRange.count || confidencePercentThresholdValue <= 0) {
+          return -Infinity;
+        }
+        if (confidencePercentThresholdValue >= 100) {
+          return Infinity;
+        }
+        const values = getFrameConfidenceValues(stem);
+        if (!values || !values.length) {
+          return -Infinity;
+        }
+        const rank = Math.min(
+          values.length - 1,
+          Math.max(0, Math.floor((confidencePercentThresholdValue / 100) * values.length))
+        );
+        return values[rank];
+      }
+
+      function effectiveConfidenceThreshold(stem) {
+        const rawThreshold = Number.isFinite(confidenceRawThreshold) ? confidenceRawThreshold : -Infinity;
+        return Math.max(rawThreshold, confidencePercentCutoff(stem));
+      }
+
+      function updateConfidenceRangeLabel() {
+        confidenceThresholdControl.classList.toggle("active", Boolean(confidenceRawRange.count));
+        if (!confidenceRawRange.count) {
+          confidenceRange.textContent = "No confidence_raw";
+          updateConfidencePercentLabel();
+          return;
+        }
+        const threshold = Number.isFinite(confidenceRawThreshold) ? confidenceRawThreshold : confidenceRawRange.min;
+        confidenceRange.textContent = `raw confidence ${confidenceRawRange.min.toFixed(3)} - ${confidenceRawRange.max.toFixed(3)}, threshold >= ${threshold.toFixed(3)} (${confidenceRawRange.files} files)`;
+        updateConfidencePercentLabel();
+      }
+
+      function syncConfidenceThresholdControl() {
+        const hasRange = Boolean(confidenceRawRange.count && Number.isFinite(confidenceRawRange.min) && Number.isFinite(confidenceRawRange.max));
+        confidenceThreshold.disabled = !hasRange;
+        resetConfidenceThreshold.disabled = !hasRange;
+        if (!hasRange) {
+          confidenceThreshold.min = "0";
+          confidenceThreshold.max = "1";
+          confidenceThreshold.step = "0.01";
+          confidenceThreshold.value = "0";
+          return;
+        }
+
+        const min = confidenceRawRange.min;
+        const max = confidenceRawRange.max;
+        const span = Math.max(max - min, 1.0e-6);
+        if (!Number.isFinite(confidenceRawThreshold)) {
+          confidenceRawThreshold = min;
+        }
+        confidenceRawThreshold = Math.min(Math.max(confidenceRawThreshold, min), max);
+        confidenceThreshold.min = String(min);
+        confidenceThreshold.max = String(max);
+        confidenceThreshold.step = String(Math.max(span / 500, 1.0e-4));
+        confidenceThreshold.value = String(confidenceRawThreshold);
+      }
+
+      function confidenceColor(t) {
+        const stops = [
+          [0.00, 0.10, 0.13, 0.36],
+          [0.25, 0.08, 0.42, 0.78],
+          [0.50, 0.05, 0.72, 0.62],
+          [0.75, 0.95, 0.78, 0.18],
+          [1.00, 0.90, 0.18, 0.12]
+        ];
+        const clamped = Math.min(Math.max(t, 0), 1);
+        for (let index = 1; index < stops.length; index += 1) {
+          const prev = stops[index - 1];
+          const next = stops[index];
+          if (clamped <= next[0]) {
+            const local = (clamped - prev[0]) / Math.max(next[0] - prev[0], 1.0e-6);
+            return [
+              prev[1] + (next[1] - prev[1]) * local,
+              prev[2] + (next[2] - prev[2]) * local,
+              prev[3] + (next[3] - prev[3]) * local
+            ];
+          }
+        }
+        const last = stops[stops.length - 1];
+        return [last[1], last[2], last[3]];
+      }
+
+      function restoreGeometryColor(item, geometry) {
+        const state = item.geometryStates && item.geometryStates.get(geometry.uuid);
+        const color = geometry.getAttribute("color");
+        if (!state || !state.color || !color) {
+          return false;
+        }
+        const indices = state.filteredIndices;
+        if (indices && color.array.length === indices.length * state.colorItemSize) {
+          for (let outIndex = 0; outIndex < indices.length; outIndex += 1) {
+            const sourceOffset = indices[outIndex] * state.colorItemSize;
+            const targetOffset = outIndex * state.colorItemSize;
+            for (let channel = 0; channel < state.colorItemSize; channel += 1) {
+              color.array[targetOffset + channel] = state.color[sourceOffset + channel];
+            }
+          }
+        } else if (color.array.length === state.color.length) {
+          color.array.set(state.color);
+        } else {
+          color.array.set(state.color.slice(0, color.array.length));
+        }
+        color.needsUpdate = true;
+        return true;
+      }
+
+      function filterArrayByIndices(source, itemSize, indices) {
+        const filtered = new Float32Array(indices.length * itemSize);
+        for (let outIndex = 0; outIndex < indices.length; outIndex += 1) {
+          const sourceOffset = indices[outIndex] * itemSize;
+          const targetOffset = outIndex * itemSize;
+          for (let channel = 0; channel < itemSize; channel += 1) {
+            filtered[targetOffset + channel] = source[sourceOffset + channel];
+          }
+        }
+        return filtered;
+      }
+
+      function applyConfidenceRawThreshold(item, geometry) {
+        const state = item.geometryStates && item.geometryStates.get(geometry.uuid);
+        if (!state || !state.position || state.indexed) {
+          return;
+        }
+        const effectiveThreshold = effectiveConfidenceThreshold(item.stem);
+
+        const shouldFilter = (
+          state.confidenceRaw
+          && confidenceRawRange.count
+          && Number.isFinite(effectiveThreshold)
+          && effectiveThreshold > confidenceRawRange.min
+        );
+
+        if (!shouldFilter) {
+          if (state.filteredIndices) {
+            geometry.setAttribute("position", new THREE.Float32BufferAttribute(state.position, state.positionItemSize));
+            if (state.color) {
+              geometry.setAttribute("color", new THREE.Float32BufferAttribute(state.color, state.colorItemSize));
+            }
+            if (state.confidenceRaw) {
+              geometry.setAttribute("confidenceRaw", new THREE.Float32BufferAttribute(state.confidenceRaw, state.confidenceRawItemSize));
+            }
+            geometry.computeBoundingBox();
+            geometry.computeBoundingSphere();
+          }
+          state.filteredIndices = null;
+          return;
+        }
+
+        const keep = [];
+        for (let index = 0; index < state.originalCount; index += 1) {
+          const value = state.confidenceRaw[index * state.confidenceRawItemSize];
+          if (Number.isFinite(value) && value >= effectiveThreshold) {
+            keep.push(index);
+          }
+        }
+        const indices = Uint32Array.from(keep);
+        state.filteredIndices = indices;
+        geometry.setAttribute(
+          "position",
+          new THREE.Float32BufferAttribute(filterArrayByIndices(state.position, state.positionItemSize, indices), state.positionItemSize)
+        );
+        if (state.color) {
+          geometry.setAttribute(
+            "color",
+            new THREE.Float32BufferAttribute(filterArrayByIndices(state.color, state.colorItemSize, indices), state.colorItemSize)
+          );
+        }
+        if (state.confidenceRaw) {
+          geometry.setAttribute(
+            "confidenceRaw",
+            new THREE.Float32BufferAttribute(filterArrayByIndices(state.confidenceRaw, state.confidenceRawItemSize, indices), state.confidenceRawItemSize)
+          );
+        }
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+      }
+
+      function applyConfidenceRawColor(item, geometry) {
+        const confidence = geometry.getAttribute("confidenceRaw");
+        const color = geometry.getAttribute("color");
+        if (!confidence || !color || !confidenceRawRange.count) {
+          return restoreGeometryColor(item, geometry);
+        }
+        restoreGeometryColor(item, geometry);
+        const values = confidence.array;
+        const colors = color.array;
+        const min = confidenceRawRange.min;
+        const span = Math.max(confidenceRawRange.max - confidenceRawRange.min, 1.0e-6);
+        for (let index = 0; index < values.length; index += 1) {
+          const value = values[index];
+          if (!Number.isFinite(value)) {
+            continue;
+          }
+          const mapped = confidenceColor((value - min) / span);
+          const offset = index * 3;
+          colors[offset] = mapped[0];
+          colors[offset + 1] = mapped[1];
+          colors[offset + 2] = mapped[2];
+        }
+        color.needsUpdate = true;
+        return true;
+      }
+
+      function applyMultiColorMode() {
+        if (mode !== "multi") {
+          return;
+        }
+        recomputeConfidenceRawRange();
+        for (const item of multiItems.values()) {
+          if (!item.loaded) {
+            continue;
+          }
+          for (const geometry of itemGeometries(item)) {
+            applyConfidenceRawThreshold(item, geometry);
+            if (multiColorMode === "confidenceRaw") {
+              applyConfidenceRawColor(item, geometry);
+            } else {
+              restoreGeometryColor(item, geometry);
+            }
+          }
+        }
+        updateMultiHighlight();
+        updateConfidenceRangeLabel();
+      }
+
+      function scheduleApplyMultiColorMode() {
+        if (colorApplyTimer) {
+          return;
+        }
+        colorApplyTimer = window.setTimeout(() => {
+          colorApplyTimer = null;
+          applyMultiColorMode();
+        }, 120);
+      }
+
+      function isMultiItemHighlighted(item) {
+        return item.layer === "regions" && item.stem === selectedMultiStem;
+      }
+
+      function updateMultiHighlight() {
+        if (mode !== "multi") {
+          return;
+        }
+        for (const item of multiItems.values()) {
+          if (!item.loaded || !item.materialStates) {
+            continue;
+          }
+          const highlighted = isMultiItemHighlighted(item);
+          const useYellowHighlight = highlighted && multiColorMode !== "confidenceRaw";
+          for (const material of itemMaterials(item)) {
+            const state = item.materialStates.get(material.uuid);
+            if (!state) {
+              continue;
+            }
+            if (useYellowHighlight) {
+              if (material.color) {
+                material.color.set(0xf2d84b);
+              }
+              if (material.vertexColors !== false) {
+                material.vertexColors = false;
+                material.needsUpdate = true;
+              }
+            } else {
+              if (material.color && state.color) {
+                material.color.copy(state.color);
+              }
+              if (material.vertexColors !== state.vertexColors) {
+                material.vertexColors = state.vertexColors;
+                material.needsUpdate = true;
+              }
+            }
+
+            if (material.isPointsMaterial && Number.isFinite(item.basePointSize)) {
+              const scale = highlighted ? 1.8 : 1.0;
+              material.size = item.basePointSize * Number(pointSize.value) * scale;
+            } else if (Number.isFinite(state.size)) {
+              material.size = state.size;
+            }
+          }
+        }
       }
 
       function installMultiGeometry(item, geometry) {
@@ -1087,6 +1875,13 @@
         }
 
         item.objects = objects;
+        rememberMultiGeometryStates(item);
+        rememberMultiMaterialStates(item);
+        computeConfidenceRawStats(item, geometry);
+        const group = multiGroups.get(item.stem);
+        if (group) {
+          group.confidenceValues = null;
+        }
         item.box = box;
         item.radius = radius;
         item.vertexCount = vertexCount;
@@ -1094,6 +1889,7 @@
         item.loaded = true;
         item.progress = null;
         item.error = "";
+        scheduleApplyMultiColorMode();
         updateMultiVisibility(true);
         renderPlyList();
       }
@@ -1125,20 +1921,22 @@
           loaded += 1;
           hasMesh = hasMesh || Boolean(item.hasMesh);
           hasPointCloud = hasPointCloud || !item.hasMesh;
-          if (item.visible) {
+          const displayed = isMultiItemDisplayed(item);
+          if (displayed) {
             visibleLoaded += 1;
           }
 
           if (item.mesh && item.points) {
-            item.mesh.visible = item.visible && !showVertices;
-            item.points.visible = item.visible && showVertices;
+            item.mesh.visible = displayed && !showVertices;
+            item.points.visible = displayed && showVertices;
           } else if (item.points) {
-            item.points.visible = item.visible;
+            item.points.visible = displayed;
           }
         }
 
         verticesOnlyControl.style.visibility = hasMesh ? "visible" : "hidden";
         pointControl.style.visibility = loaded && (showVertices || hasPointCloud) ? "visible" : "hidden";
+        updateMultiHighlight();
         frameMultiVisible(frameCamera);
 
         const parts = [];
@@ -1154,6 +1952,23 @@
         if (!parts.length) {
           parts.push(`${multiItems.size} queued`);
         }
+        const selection = multiSelectionStatus();
+        if (selection) {
+          parts.push(selection);
+        }
+        if (
+          confidenceRawRange.count
+          && Number.isFinite(confidenceRawThreshold)
+          && confidenceRawThreshold > confidenceRawRange.min
+        ) {
+          parts.push(`raw confidence >= ${confidenceRawThreshold.toFixed(3)}`);
+        }
+        if (confidenceRawRange.count && confidencePercentThresholdValue > 0) {
+          parts.push(confidencePercentLabelText());
+        }
+        if (multiColorMode === "confidenceRaw") {
+          parts.push(confidenceRawRange.count ? "raw confidence color" : "no confidence_raw");
+        }
         setStatus(parts.join(", "), errors > 0);
       }
 
@@ -1162,7 +1977,7 @@
         let hasVisible = false;
 
         for (const item of multiItems.values()) {
-          if (!item.loaded || !item.visible || !item.box) {
+          if (!item.loaded || !isMultiItemDisplayed(item) || !item.box) {
             continue;
           }
           combined.union(item.box);
@@ -1388,6 +2203,48 @@
       }
 
       showGrid.addEventListener("change", updateGridVisibility);
+      showAllPly.addEventListener("click", () => setAllMultiVisibility(true));
+      hideAllPly.addEventListener("click", () => setAllMultiVisibility(false));
+      showRgbLayer.addEventListener("change", () => {
+        updateMultiVisibility(false);
+        renderPlyList();
+      });
+      showRegionLayer.addEventListener("change", () => {
+        updateMultiVisibility(false);
+        renderPlyList();
+      });
+      showRectangleLayer.addEventListener("change", () => {
+        updateMultiVisibility(false);
+        renderPlyList();
+      });
+      colorSource.addEventListener("change", () => {
+        multiColorMode = colorSource.value;
+        applyMultiColorMode();
+        updateMultiVisibility(false);
+      });
+      confidenceThreshold.addEventListener("input", () => {
+        confidenceRawThreshold = Number(confidenceThreshold.value);
+        updateConfidenceRangeLabel();
+        scheduleApplyMultiColorMode();
+      });
+      confidencePercentThreshold.addEventListener("input", () => {
+        confidencePercentThresholdValue = Number(confidencePercentThreshold.value);
+        updateConfidencePercentLabel();
+        scheduleApplyMultiColorMode();
+      });
+      resetConfidenceThreshold.addEventListener("click", () => {
+        if (confidenceRawRange.count) {
+          confidenceRawThreshold = confidenceRawRange.min;
+          confidenceThreshold.value = String(confidenceRawThreshold);
+        } else {
+          confidenceRawThreshold = -Infinity;
+        }
+        confidencePercentThresholdValue = 0;
+        confidencePercentThreshold.value = "0";
+        updateConfidencePercentLabel();
+        applyMultiColorMode();
+        updateMultiVisibility(false);
+      });
       verticesOnly.addEventListener("change", updateDisplayMode);
       pointSize.addEventListener("input", updatePointSize);
       resetView.addEventListener("click", resetCamera);
@@ -1401,20 +2258,29 @@
         updatePlayTimer();
       });
       document.addEventListener("keydown", (event) => {
-        if (mode !== "folder") {
-          return;
-        }
         const target = event.target;
         const tagName = target && target.tagName ? target.tagName.toLowerCase() : "";
         if (tagName === "input" || tagName === "select" || tagName === "textarea") {
           return;
         }
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          loadFolderItem(currentFolderIndex - 1, false);
-        } else if (event.key === "ArrowRight") {
-          event.preventDefault();
-          loadFolderItem(currentFolderIndex + 1, false);
+        if (mode === "multi") {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            selectAdjacentMultiStem(-1);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            selectAdjacentMultiStem(1);
+          }
+          return;
+        }
+        if (mode === "folder") {
+          if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            loadFolderItem(currentFolderIndex - 1, false);
+          } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            loadFolderItem(currentFolderIndex + 1, false);
+          }
         }
       });
       window.addEventListener("resize", resize);
