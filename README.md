@@ -17,6 +17,8 @@ only manage services that were registered by this toolbox.
 git clone https://github.com/Cynthia11281128/cli-tools.git ~/cli-tools
 cd ~/cli-tools
 ./install.sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
 ./install.sh --check
 cli-tools list
 ```
